@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Audit log · {{ app_name }}{% endblock %}
+{% block content %}
+  <h2>Audit log</h2>
+  <div class="card">
+    <p class="muted small">The latest 300 state-changing events. ChainLoop does not silently rewrite corrections; reversals and corrections remain visible here.</p>
+    {% if events %}
+    <table><tr><th>Date</th><th>Event</th><th>Bike</th><th>Chain</th><th>Activity</th><th>Distance</th><th>Note</th></tr>
+      {% for e in events %}
+      <tr>
+        <td class="nowrap">{{ e.created_at|localdt }}</td>
+        <td class="mono">{{ e.event_type }}</td>
+        <td>{{ bikes.get(e.bike_id).name if e.bike_id and bikes.get(e.bike_id) else '—' }}</td>
+        <td>{% if e.chain_id and chains.get(e.chain_id) %}<a class="mono" href="/chains/{{ e.chain_id }}">{{ chains.get(e.chain_id).code }}</a>{% else %}—{% endif %}</td>
+        <td>{% if e.activity_id and activities.get(e.activity_id) %}<a href="/activities/{{ e.activity_id }}">{{ activities.get(e.activity_id).raw_name or activities.get(e.activity_id).external_id }}</a>{% else %}—{% endif %}</td>
+        <td>{{ ('%.2f km'|format(e.distance_km)) if e.distance_km is not none else '—' }}</td>
+        <td>{{ e.note or '—' }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}<span class="muted">No audit events recorded.</span>{% endif %}
+  </div>
+{% endblock %}

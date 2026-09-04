@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Activity {{ activity.external_id }} · {{ app_name }}{% endblock %}
+{% block content %}
+  <div class="card">
+    <h2>Activity correction</h2>
+    <div class="statline">
+      <div><strong>Date:</strong> {{ activity.occurred_at|localdt }}</div>
+      <div><strong>Name:</strong> {{ activity.raw_name or '—' }}</div>
+      <div><strong>Source:</strong> {{ activity.source }} / <span class="mono">{{ activity.external_id }}</span></div>
+      <div><strong>Raw Strava gear:</strong> <span class="mono">{{ activity.raw_gear_id or '—' }}</span></div>
+      <div><strong>Current distance:</strong> {{ '%.2f'|format(activity.distance_km) }} km</div>
+      <div><strong>Counted:</strong> {{ 'yes' if activity.processed else 'no' }} · <strong>Excluded:</strong> {{ 'yes' if activity.excluded else 'no' }}</div>
+      <div><strong>Credited chain:</strong> {{ credited_chain.code if credited_chain else '—' }}</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <p class="note">If this ride was already counted, ChainLoop first reverses its existing chain accounting, then applies the corrected values. Corrections do not send retroactive Pushover threshold notifications.</p>
+    <form method="post" action="/activities/{{ activity.id }}/correct">
+      <div class="row">
+        <div><label>Bike</label><select name="bike_id"><option value="">No bike / unassigned</option>{% for b in bikes %}<option value="{{ b.id }}" {% if activity.bike_id==b.id %}selected{% endif %}>{{ b.name }}</option>{% endfor %}</select></div>
+        <div><label>Chain to credit</label><select name="chain_id"><option value="">Do not count yet</option>{% for c in chains %}<option value="{{ c.id }}" {% if activity.credited_chain_id==c.id %}selected{% endif %}>{{ c.code }}</option>{% endfor %}</select></div>
+      </div>
+      <label>Distance (km)</label><input name="distance_km" type="number" min="0" step="0.001" value="{{ '%.3f'|format(activity.distance_km) }}" required>
+      <label style="font-weight:400"><input type="checkbox" name="excluded" value="true" style="width:auto" {% if activity.excluded %}checked{% endif %}> Exclude this activity from chain accounting</label>
+      <label>Correction reason (required)</label><textarea name="note" required placeholder="e.g. Wrong bike selected in Strava"></textarea>
+      <button class="primary">Save correction</button>
+    </form>
+  </div>
+{% endblock %}

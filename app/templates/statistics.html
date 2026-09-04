@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Statistics · {{ app_name }}{% endblock %}
+{% block content %}
+  <h2>Chain comparison</h2>
+  <div class="card">
+    <table><tr><th>Chain</th><th>Lifetime km</th><th>Wax treatments</th><th>Current cycle</th><th>Completed cycles</th><th>Avg wax interval</th><th>Wear</th><th>Status</th></tr>
+      {% for row in comparison %}<tr><td><a class="mono" href="/chains/{{ row.chain.id }}">{{ row.chain.code }}</a></td><td>{{ '%.1f'|format(row.chain.total_km) }}</td><td>{{ row.wax_treatments }}</td><td>{{ row.current_cycle if row.current_cycle else '—' }}</td><td>{{ row.completed_cycles }}</td><td>{{ ('%.1f km'|format(row.avg_interval)) if row.avg_interval is not none else '—' }}</td><td>{{ ('%.2f %%'|format(row.chain.current_wear_percent)) if row.chain.current_wear_percent is not none else '—' }}</td><td>{{ row.chain.status }}</td></tr>{% endfor %}
+    </table>
+  </div>
+
+  <h2>Wax performance</h2>
+  <div class="card">
+    <p class="muted small">Completed intervals are attributed to the wax product that was applied at the start of that interval. Total km also includes the currently active/incomplete interval for that product.</p>
+    <table><tr><th>Wax product</th><th>Completed cycles</th><th>Average</th><th>Median</th><th>Shortest</th><th>Longest</th><th>Total observed km</th></tr>
+      {% for s in wax_stats %}<tr><td>{{ s.product }}</td><td>{{ s.completed_cycles }}</td><td>{{ ('%.1f km'|format(s.average)) if s.average is not none else '—' }}</td><td>{{ ('%.1f km'|format(s.median)) if s.median is not none else '—' }}</td><td>{{ ('%.1f km'|format(s.shortest)) if s.shortest is not none else '—' }}</td><td>{{ ('%.1f km'|format(s.longest)) if s.longest is not none else '—' }}</td><td>{{ '%.1f km'|format(s.total_km) }}</td></tr>{% endfor %}
+    </table>
+  </div>
+
+  <h2>Wear vs lifetime distance</h2>
+  <div class="card">
+    {% if wear_series %}
+      <svg id="wearChart" class="chart" viewBox="0 0 900 360" role="img" aria-label="Wear percentage versus lifetime chain distance"></svg>
+      <div id="wearLegend" class="legend"></div>
+    {% else %}<span class="muted">No wear measurements with lifetime-distance snapshots yet. New measurements in v0.5.0 are recorded with their chain lifetime km.</span>{% endif %}
+  </div>
+
+  <h2>Wax interval history</h2>
+  <div class="card">
+    {% if wax_records %}
+      <svg id="waxChart" class="chart" viewBox="0 0 900 360" role="img" aria-label="Completed wax interval distances"></svg>
+      <table><tr><th>Chain</th><th>Wax product</th><th>Start</th><th>End</th><th>Distance</th></tr>{% for r in wax_records|reverse %}<tr><td class="mono">{{ r.chain_code }}</td><td>{{ r.product }}</td><td>{{ r.start|localdt }}</td><td>{{ r.end|localdt }}</td><td>{{ '%.1f'|format(r.km) }} km</td></tr>{% endfor %}</table>
+    {% else %}<span class="muted">No completed wax cycles yet. A cycle becomes complete when the chain is waxed again.</span>{% endif %}
+  </div>
+
+<script>
+(function(){
+  const wear = {{ wear_series|tojson }};
+  if (wear.length) {
+    const svg = document.getElementById('wearChart'), legend=document.getElementById('wearLegend');
+    const W=900,H=360,L=65,R=25,T=25,B=50;
+    const pts=wear.flatMap(s=>s.points);
+    const maxX=Math.max(1,...pts.map(p=>p[0])), maxY=Math.max(.5,...pts.map(p=>p[1]));
+    const colors=['#2f941d','#2767c5','#b06a00','#8b3f9e','#c43d32','#14828c'];
+    const el=(name,attrs={})=>{const n=document.createElementNS('http://www.w3.org/2000/svg',name);Object.entries(attrs).forEach(([k,v])=>n.setAttribute(k,v));return n};
+    const sx=x=>L+x/maxX*(W-L-R), sy=y=>H-B-y/maxY*(H-T-B);
+    svg.append(el('line',{x1:L,y1:H-B,x2:W-R,y2:H-B,stroke:'#8892a0'})); svg.append(el('line',{x1:L,y1:T,x2:L,y2:H-B,stroke:'#8892a0'}));
+    for(let i=0;i<=5;i++){const x=maxX*i/5, px=sx(x); const t=el('text',{x:px,y:H-20,'text-anchor':'middle','font-size':'12',fill:'#667085'});t.textContent=Math.round(x)+' km';svg.append(t)}
+    for(let i=0;i<=5;i++){const y=maxY*i/5, py=sy(y); const t=el('text',{x:L-10,y:py+4,'text-anchor':'end','font-size':'12',fill:'#667085'});t.textContent=y.toFixed(2)+'%';svg.append(t)}
+    wear.forEach((s,idx)=>{const color=colors[idx%colors.length]; const points=s.points.map(p=>sx(p[0])+','+sy(p[1])).join(' ');svg.append(el('polyline',{points,fill:'none',stroke:color,'stroke-width':'3'}));s.points.forEach(p=>svg.append(el('circle',{cx:sx(p[0]),cy:sy(p[1]),r:4,fill:color})));const span=document.createElement('span');span.textContent=s.chain;span.style.color=color;legend.append(span)});
+  }
+
+  const wax = {{ wax_graph_records|tojson }};
+  if (wax.length) {
+    const svg=document.getElementById('waxChart'),W=900,H=360,L=65,R=25,T=25,B=60; const max=Math.max(1,...wax.map(x=>x.km)); const bw=Math.max(8,(W-L-R)/wax.length*.65); const gap=(W-L-R)/wax.length;
+    const el=(name,attrs={})=>{const n=document.createElementNS('http://www.w3.org/2000/svg',name);Object.entries(attrs).forEach(([k,v])=>n.setAttribute(k,v));return n};
+    svg.append(el('line',{x1:L,y1:H-B,x2:W-R,y2:H-B,stroke:'#8892a0'})); svg.append(el('line',{x1:L,y1:T,x2:L,y2:H-B,stroke:'#8892a0'}));
+    wax.forEach((r,i)=>{const h=r.km/max*(H-T-B), x=L+i*gap+(gap-bw)/2, y=H-B-h;svg.append(el('rect',{x,y,width:bw,height:h,rx:3,fill:'#49c724'}));const t=el('text',{x:x+bw/2,y:H-B+17,'text-anchor':'middle','font-size':'10',fill:'#667085'});t.textContent=r.chain_code;svg.append(t)});
+    for(let i=0;i<=5;i++){const v=max*i/5,py=H-B-v/max*(H-T-B);const t=el('text',{x:L-10,y:py+4,'text-anchor':'end','font-size':'12',fill:'#667085'});t.textContent=Math.round(v)+' km';svg.append(t)}
+  }
+})();
+</script>
+{% endblock %}

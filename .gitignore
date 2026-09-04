@@ -1,0 +1,26 @@
+# Local deployment configuration / secrets
+.env
+docker-compose.yaml
+docker-compose.yml
+
+# Persistent runtime data
+data/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Python runtime / local tooling
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Editor / OS noise
+.DS_Store
+.idea/
+.vscode/

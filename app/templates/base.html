@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{% block title %}{{ app_name }}{% endblock %}</title>
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" href="/favicon.png" type="image/png">
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<div class="wrap">
+  <div class="hero">
+    <img src="/static/branding/chainloop-logo-dark.png" alt="ChainLoop logo">
+    <p>Bicycle chain usage, wear &amp; maintenance tracking · v{{ app_version }}</p>
+  </div>
+  <div class="nav">
+    <a class="btn" href="/">Dashboard</a>
+    <a class="btn" href="/statistics">Statistics</a>
+    <a class="btn" href="/history">Audit log</a>
+    <a class="btn" href="/admin">Administration</a>
+  </div>
+  {% block content %}{% endblock %}
+  <div class="footer">ChainLoop stores its authoritative history in SQLite. Home Assistant and Pushover are integrations, not the primary datastore.</div>
+</div>
+</body>
+</html>

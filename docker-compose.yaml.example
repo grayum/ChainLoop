@@ -1,0 +1,52 @@
+services:
+  chainloop:
+    build: .
+    image: chainloop:local
+    container_name: chainloop
+    restart: unless-stopped
+
+    environment:
+      DATABASE_URL: "${DATABASE_URL:-sqlite:////data/chainloop.db}"
+      APP_BASE_URL: "${APP_BASE_URL:?Set APP_BASE_URL in .env}"
+
+      STRAVA_CLIENT_ID: "${STRAVA_CLIENT_ID:?Set STRAVA_CLIENT_ID in .env}"
+      STRAVA_CLIENT_SECRET: "${STRAVA_CLIENT_SECRET:?Set STRAVA_CLIENT_SECRET in .env}"
+      STRAVA_REDIRECT_URI: "${STRAVA_REDIRECT_URI:?Set STRAVA_REDIRECT_URI in .env}"
+      STRAVA_SCOPES: "${STRAVA_SCOPES:-activity:read_all}"
+      STRAVA_API_BASE_URL: "${STRAVA_API_BASE_URL:-https://www.strava.com/api/v3}"
+      STRAVA_VERIFY_TOKEN: "${STRAVA_VERIFY_TOKEN:-}"
+      STRAVA_AUTO_SYNC: "${STRAVA_AUTO_SYNC:-true}"
+      STRAVA_SYNC_TIME: "${STRAVA_SYNC_TIME:-21:00}"
+      STRAVA_SYNC_TIMES: "${STRAVA_SYNC_TIMES:-}"
+      CHAINLOOP_TIMEZONE: "${CHAINLOOP_TIMEZONE:-Europe/Amsterdam}"
+
+      SESSION_SECRET: "${SESSION_SECRET:?Set SESSION_SECRET in .env}"
+
+      PUSHOVER_APP_TOKEN: "${PUSHOVER_APP_TOKEN:?Set PUSHOVER_APP_TOKEN in .env}"
+      PUSHOVER_USER_KEY: "${PUSHOVER_USER_KEY:?Set PUSHOVER_USER_KEY in .env}"
+
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik"
+      - "traefik.http.routers.chainloop.rule=Host(`${CHAINLOOP_HOST:?Set CHAINLOOP_HOST in .env}`)"
+      - "traefik.http.routers.chainloop.entrypoints=websecure"
+      - "traefik.http.routers.chainloop.tls=true"
+      - "traefik.http.routers.chainloop.tls.certresolver=myresolver"
+      - "traefik.http.services.chainloop.loadbalancer.server.port=8080"
+
+    networks:
+      - traefik
+
+    volumes:
+      - ./data:/data
+
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+networks:
+  traefik:
+    external: true
