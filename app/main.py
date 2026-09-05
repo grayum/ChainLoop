@@ -584,11 +584,14 @@ def check_distance_thresholds(db: Session, bike: Bike, chain: Chain) -> None:
 
     if chain.km_since_wax >= bike.change_km:
         ready = db.scalar(
-            select(Chain.id).where(
+            select(Chain.id)
+            .where(
                 Chain.bike_id == bike.id,
                 Chain.status == "READY",
                 Chain.id != chain.id,
-            ).limit(1)
+                select(WaxEvent.id).where(WaxEvent.chain_id == Chain.id).exists(),
+            )
+            .limit(1)
         )
         if ready is None and not notification_already_handled(db, chain.id, cycle_key, "NO_SPARE"):
             sent, error = send_pushover(
@@ -662,7 +665,13 @@ def apply_activity_to_chain(db: Session, activity: Activity, bike: Bike, chain: 
     start = ensure_activity_datetime(bike.tracking_start_at)
     if occurred < start:
         return False
-    if chain.bike_id != bike.id or chain.status == "RETIRED":
+    if chain.bike_id != bike.id:
+        return False
+    # Retirement prevents new attribution, but it must not erase the chain's
+    # historical eligibility for rides that occurred before it was retired.
+    if chain.status == "RETIRED" and (
+        chain.retired_at is None or occurred > ensure_activity_datetime(chain.retired_at)
+    ):
         return False
     if chain.first_used_at and occurred < ensure_activity_datetime(chain.first_used_at):
         return False
@@ -1577,7 +1586,9 @@ def record_initial_wax(
             note=note or "Initial wax treatment",
         ))
         db.flush()
-        chain.km_since_wax = 0
+        # Legacy READY chains may already have accurately accumulated distance.
+        # Recording their missing treatment establishes cycle 1; it is not a
+        # new treatment that closes and resets that live cycle.
         if chain.status == "NEW":
             chain.status = "READY"
         record_event(db, "CHAIN_INITIAL_WAX", chain_id=chain.id, bike_id=chain.bike_id, note=note or None, metadata={
@@ -1919,7 +1930,9 @@ def activity_detail(request: Request, activity_id: int):
         if not activity:
             raise HTTPException(404, "Activity not found")
         bikes = db.scalars(select(Bike).order_by(Bike.name)).all()
-        chains = db.scalars(select(Chain).where(Chain.status != "RETIRED").order_by(Chain.code)).all()
+        # Retired chains remain selectable for auditable corrections to rides
+        # that occurred no later than their recorded retirement.
+        chains = db.scalars(select(Chain).order_by(Chain.code)).all()
         credited_chain = db.get(Chain, activity.credited_chain_id) if activity.credited_chain_id else None
         return templates.TemplateResponse(request=request, name="activity.html", context={
             "app_name": APP_NAME, "app_version": APP_VERSION, "activity": activity, "bikes": bikes, "chains": chains,
@@ -1958,8 +1971,11 @@ def correct_activity(
         target_chain = db.get(Chain, int(chain_id)) if chain_id else None
         if target_chain and (not target_bike or target_chain.bike_id != target_bike.id):
             raise HTTPException(400, "Selected chain does not belong to selected bike")
-        if target_chain and target_chain.status == "RETIRED":
-            raise HTTPException(400, "Cannot credit a retired chain")
+        if target_chain and target_chain.status == "RETIRED" and (
+            target_chain.retired_at is None
+            or ensure_activity_datetime(activity.occurred_at) > ensure_activity_datetime(target_chain.retired_at)
+        ):
+            raise HTTPException(400, "Cannot credit a ride after the chain was retired")
 
         activity.bike_id = target_bike.id if target_bike else None
         activity.distance_km = distance_km

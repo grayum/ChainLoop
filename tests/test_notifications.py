@@ -1,8 +1,6 @@
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-import pytest
-
 from app import main
 
 
@@ -39,7 +37,6 @@ def test_failed_notification_is_retried(db_engine, configured_chain, monkeypatch
         assert db.scalar(select(main.NotificationState).where(main.NotificationState.level == "WARNING")) is None
 
 
-@pytest.mark.xfail(strict=True, reason="Known defect: no-spare notification treats READY chains without wax history as usable spares")
 def test_unwaxed_ready_chain_does_not_suppress_no_spare_warning(db_engine, configured_chain, monkeypatch):
     monkeypatch.setattr(main, "PUSHOVER_APP_TOKEN", "configured")
     monkeypatch.setattr(main, "PUSHOVER_USER_KEY", "configured")
@@ -55,4 +52,3 @@ def test_unwaxed_ready_chain_does_not_suppress_no_spare_warning(db_engine, confi
         db.flush()
         main.check_distance_thresholds(db, bike, active)
         assert db.scalar(select(main.NotificationState).where(main.NotificationState.level == "NO_SPARE")) is not None
-

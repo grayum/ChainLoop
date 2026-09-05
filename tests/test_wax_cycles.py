@@ -1,6 +1,5 @@
 from datetime import datetime, timezone
 
-import pytest
 from sqlalchemy.orm import Session
 
 from app import main
@@ -20,7 +19,6 @@ def test_first_wax_is_cycle_one_and_second_completes_first_cycle(db_engine, conf
         assert main.wax_cycle_records(db)[0]["km"] == 412.5
 
 
-@pytest.mark.xfail(strict=True, reason="Known defect: recording a missing initial wax discards nonzero legacy km_since_wax")
 def test_legacy_initial_wax_preserves_existing_cycle_distance(db_engine, monkeypatch):
     with Session(db_engine) as db:
         spec = main.ChainSpec(name="Legacy Spec", speeds=None, link_count=None, manufacturer=None, model=None)
