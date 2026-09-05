@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 from sqlalchemy import create_engine, select, func, inspect, text, UniqueConstraint
+from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, Session
 
 APP_NAME = "ChainLoop"
@@ -27,12 +28,6 @@ STATIC_DIR = BASE_DIR / "static"
 # Keep persistent application state in the bind-mounted /data directory by default.
 DEFAULT_DATABASE_URL = "sqlite:////data/chainloop.db"
 DATABASE_URL = os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL)
-# Preserve databases created by the original Chain Tracker MVP when upgrading in-place.
-if DATABASE_URL == DEFAULT_DATABASE_URL:
-    legacy_db = Path("/data/chain_tracker.db")
-    current_db = Path("/data/chainloop.db")
-    if legacy_db.exists() and not current_db.exists():
-        legacy_db.rename(current_db)
 
 APP_BASE_URL = os.getenv("APP_BASE_URL", "http://localhost:8080").rstrip("/")
 SESSION_SECRET = os.getenv("SESSION_SECRET", "change-me")
@@ -53,8 +48,61 @@ STRAVA_SYNC_TIMES = os.getenv("STRAVA_SYNC_TIMES", "").strip()
 PUSHOVER_APP_TOKEN = os.getenv("PUSHOVER_APP_TOKEN", "")
 PUSHOVER_USER_KEY = os.getenv("PUSHOVER_USER_KEY", "")
 
+def sqlite_database_path(database_url: str) -> Path | None:
+    """Resolve a file-backed SQLite URL without opening the database."""
+    url = make_url(database_url)
+    if not url.drivername.startswith("sqlite"):
+        return None
+    database = url.database
+    if not database or database == ":memory:":
+        return None
+    if database.startswith("file:"):
+        database = database[5:].split("?", 1)[0]
+    return Path(database).expanduser().resolve()
+
+
+def validate_test_database_url(database_url: str) -> None:
+    """Prevent pytest imports from touching persistent or arbitrary databases."""
+    if os.getenv("CHAINLOOP_TESTING") != "1":
+        return
+    root_value = os.getenv("CHAINLOOP_TEST_TMPDIR")
+    if not root_value:
+        raise RuntimeError("CHAINLOOP_TEST_TMPDIR is required when CHAINLOOP_TESTING=1")
+    url = make_url(database_url)
+    if not url.drivername.startswith("sqlite"):
+        raise RuntimeError("Tests may only use SQLite databases")
+    database_path = sqlite_database_path(database_url)
+    if database_path is None:
+        return
+    temporary_root = Path(root_value).expanduser().resolve()
+    try:
+        database_path.relative_to(temporary_root)
+    except ValueError as exc:
+        raise RuntimeError(
+            f"Refusing test database outside pytest temporary directory: {database_path}"
+        ) from exc
+
+
+def create_database_engine(database_url: str) -> Engine:
+    """Create ChainLoop's SQLite engine through one testable safety seam."""
+    validate_test_database_url(database_url)
+    return create_engine(database_url, connect_args={"check_same_thread": False})
+
+
+def migrate_legacy_database(database_url: str) -> None:
+    """Preserve the original production filename migration."""
+    if database_url != DEFAULT_DATABASE_URL:
+        return
+    legacy_db = Path("/data/chain_tracker.db")
+    current_db = Path("/data/chainloop.db")
+    if legacy_db.exists() and not current_db.exists():
+        legacy_db.rename(current_db)
+
+
 # FastAPI request workers and the background sync scheduler share this SQLite engine.
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+validate_test_database_url(DATABASE_URL)
+migrate_legacy_database(DATABASE_URL)
+engine = create_database_engine(DATABASE_URL)
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 signer = URLSafeTimedSerializer(SESSION_SECRET, salt="chainloop-oauth-state")
 sync_lock = threading.Lock()
@@ -221,25 +269,26 @@ def now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def ensure_schema() -> None:
+def ensure_schema(database_engine: Engine | None = None) -> None:
     """Create new tables and apply small backwards-compatible SQLite upgrades."""
-    Base.metadata.create_all(engine)
-    inspector = inspect(engine)
+    target_engine = database_engine or engine
+    Base.metadata.create_all(target_engine)
+    inspector = inspect(target_engine)
     tables = set(inspector.get_table_names())
 
     # These ALTERs intentionally stay additive so existing user data is never rebuilt.
     if "bikes" in tables:
         columns = {c["name"] for c in inspector.get_columns("bikes")}
         if "tracking_start_at" not in columns:
-            with engine.begin() as conn:
+            with target_engine.begin() as conn:
                 conn.execute(text("ALTER TABLE bikes ADD COLUMN tracking_start_at DATETIME"))
 
     if "activities" in tables:
         columns = {c["name"] for c in inspector.get_columns("activities")}
         if "credited_chain_id" not in columns:
-            with engine.begin() as conn:
+            with target_engine.begin() as conn:
                 conn.execute(text("ALTER TABLE activities ADD COLUMN credited_chain_id INTEGER"))
-        with engine.begin() as conn:
+        with target_engine.begin() as conn:
             conn.execute(text(
                 "CREATE UNIQUE INDEX IF NOT EXISTS uq_activities_source_external_id "
                 "ON activities(source, external_id)"
@@ -248,17 +297,17 @@ def ensure_schema() -> None:
     if "wear_measurements" in tables:
         columns = {c["name"] for c in inspector.get_columns("wear_measurements")}
         if "total_km_at_measurement" not in columns:
-            with engine.begin() as conn:
+            with target_engine.begin() as conn:
                 conn.execute(text("ALTER TABLE wear_measurements ADD COLUMN total_km_at_measurement FLOAT"))
 
     if "wax_products" in tables:
         columns = {c["name"] for c in inspector.get_columns("wax_products")}
         if "archived" not in columns:
-            with engine.begin() as conn:
+            with target_engine.begin() as conn:
                 conn.execute(text("ALTER TABLE wax_products ADD COLUMN archived BOOLEAN NOT NULL DEFAULT 0"))
 
     if "chains" in tables:
-        with engine.begin() as conn:
+        with target_engine.begin() as conn:
             conn.execute(text(
                 "CREATE UNIQUE INDEX IF NOT EXISTS uq_chains_one_in_use_per_bike "
                 "ON chains(bike_id) WHERE status='IN_USE'"
@@ -372,10 +421,11 @@ def record_event(
 
 
 # --- Data migrations -------------------------------------------------------
-def post_schema_data_migrations() -> None:
+def post_schema_data_migrations(database_engine: Engine | None = None) -> None:
     """Backfill v0.4 data into v0.5 bookkeeping once, without changing chain totals."""
+    target_engine = database_engine or engine
     marker_key = "v0.5.0-data-backfill"
-    with Session(engine) as db:
+    with Session(target_engine) as db:
         if db.get(MigrationMarker, marker_key):
             return
         # Existing processed rides know their credited chain through their RIDE_ADDED event.
