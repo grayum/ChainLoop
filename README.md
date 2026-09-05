@@ -307,6 +307,19 @@ GET /api/activities/recent
 GET /api/history/{chain_id}
 ```
 
+## Development tests
+
+Install the test-only dependencies and run the suite:
+
+```bash
+python -m pip install -r requirements-dev.txt
+python -m pytest
+```
+
+The test harness permits only in-memory SQLite databases or database files
+inside its disposable pytest directory. Importing the application during a
+test fails before opening a database if `DATABASE_URL` resolves elsewhere.
+
 ## Branding
 
 | Asset | Purpose |
