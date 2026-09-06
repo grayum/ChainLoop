@@ -1,6 +1,5 @@
 from datetime import datetime, timezone
 
-import pytest
 from sqlalchemy.orm import Session
 
 from app import main
@@ -59,7 +58,6 @@ def test_reversing_activity_restores_both_counters(db_engine, configured_chain):
         assert activity.credited_chain_id is None
 
 
-@pytest.mark.xfail(strict=True, reason="Known defect: a historical correction cannot credit a chain that is now retired")
 def test_historical_activity_can_be_credited_to_now_retired_chain(db_engine, configured_chain):
     with Session(db_engine) as db:
         chain = db.get(main.Chain, configured_chain["chain_id"])
@@ -68,3 +66,15 @@ def test_historical_activity_can_be_credited_to_now_retired_chain(db_engine, con
         chain.retired_at = datetime(2025, 3, 1, tzinfo=timezone.utc)
         activity = _activity(db, external_id="retired-history", occurred_at=datetime(2025, 2, 1, tzinfo=timezone.utc), distance=30, bike_id=bike.id)
         assert main.apply_activity_to_chain(db, activity, bike, chain, notify=False)
+
+
+def test_activity_after_retirement_cannot_be_credited_to_retired_chain(db_engine, configured_chain):
+    with Session(db_engine) as db:
+        chain = db.get(main.Chain, configured_chain["chain_id"])
+        bike = db.get(main.Bike, configured_chain["bike_id"])
+        chain.status = "RETIRED"
+        chain.retired_at = datetime(2025, 3, 1, tzinfo=timezone.utc)
+        activity = _activity(db, external_id="after-retirement", occurred_at=datetime(2025, 3, 2, tzinfo=timezone.utc), distance=30, bike_id=bike.id)
+        assert not main.apply_activity_to_chain(db, activity, bike, chain, notify=False)
+        assert not activity.processed
+        assert activity.credited_chain_id is None
