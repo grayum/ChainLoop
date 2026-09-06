@@ -16,7 +16,9 @@ The repository provides `.env.example` and `docker-compose.yaml.example` as refe
 
 ## Before every upgrade
 
-1. Confirm your normal backup system has a recent copy of the ChainLoop directory/database.
+1. Make or confirm a recent backup of the ChainLoop directory/database before
+   installing a release that can migrate the database.
+   Do not rely on ChainLoop to create an automatic migration backup.
 2. Check `CHANGELOG.md` for release-specific notes.
 3. Stop ChainLoop before replacing application files:
 
@@ -106,11 +108,21 @@ In the UI verify:
 
 ## Database migrations
 
-Current releases use small additive SQLite migrations during startup. They are designed to preserve existing data rather than rebuild tables.
+ChainLoop runs ordered, additive SQLite migrations during application startup,
+before the scheduler begins. Successful migrations are recorded in the
+`schema_migrations` ledger. The older `migration_markers` table is retained as
+historical evidence and is not replaced or repurposed.
+
+Fresh empty databases are created at the current schema. Supported older
+databases without a ledger are structurally validated before they are adopted.
+Databases with a ledger are migrated in version order. ChainLoop refuses to
+start rather than guess when it finds a newer schema, a contradictory ledger or
+marker state, or an unsupported legacy shape.
+
+Migration versions are append-only: released version/name pairs keep their
+original meaning, and later schema work receives a new version.
 
 Never replace `data/chainloop.db` with an empty database during an application upgrade.
-
-As ChainLoop matures, schema changes will move to a dedicated migration framework such as Alembic.
 
 ## v0.6.x -> v0.7.0 notes
 
