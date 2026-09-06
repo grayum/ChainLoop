@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- Added an ordered, append-only SQLite schema migration ledger with explicit
+  current-version and postcondition validation.
+- Added safe adoption of supported pre-ledger ChainLoop databases while
+  preserving the historical `migration_markers` table and its data.
+- Moved legacy filename handling and all database migrations out of module
+  import and into controlled application startup before scheduler launch.
+- Added explicit rejection of newer, contradictory and unsupported database
+  states instead of attempting speculative repair.
+- Serialized concurrent SQLite startup migrations with a write lock and busy
+  timeout.
+
 ## 0.7.0
 
 - Added correct wax treatment/cycle semantics: the first recorded wax starts cycle 1; chains with no treatment show no active cycle instead of cycle 0.

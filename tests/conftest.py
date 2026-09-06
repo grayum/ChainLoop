@@ -9,7 +9,7 @@ import pytest
 
 
 # This is established before test modules import app.main. The application checks
-# both variables before constructing an engine or running import-time migrations.
+# both variables before constructing an engine; imports never run migrations.
 TEST_DATABASE_ROOT = Path(tempfile.mkdtemp(prefix="chainloop-pytest-2"))
 os.environ["CHAINLOOP_TESTING"] = "1"
 os.environ["CHAINLOOP_TEST_TMPDIR"] = str(TEST_DATABASE_ROOT)
@@ -31,8 +31,7 @@ def db_engine(database_path):
     from app import main
 
     engine = main.create_database_engine(f"sqlite:///{database_path}")
-    main.ensure_schema(engine)
-    main.post_schema_data_migrations(engine)
+    main.migrate_database(engine, main.Base.metadata)
     yield engine
     engine.dispose()
 
@@ -83,4 +82,3 @@ def configured_chain(db_engine):
         ))
         db.commit()
         return {"bike_id": bike.id, "chain_id": chain.id, "wax_id": wax.id}
-

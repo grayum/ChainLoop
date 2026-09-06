@@ -14,9 +14,11 @@ from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, File
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
-from sqlalchemy import create_engine, select, func, inspect, text, UniqueConstraint
+from sqlalchemy import create_engine, select, func, UniqueConstraint
 from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, Session
+
+from app.migrations import migrate_database
 
 APP_NAME = "ChainLoop"
 APP_VERSION = "0.7.0"
@@ -86,7 +88,10 @@ def validate_test_database_url(database_url: str) -> None:
 def create_database_engine(database_url: str) -> Engine:
     """Create ChainLoop's SQLite engine through one testable safety seam."""
     validate_test_database_url(database_url)
-    return create_engine(database_url, connect_args={"check_same_thread": False})
+    return create_engine(
+        database_url,
+        connect_args={"check_same_thread": False, "timeout": 30},
+    )
 
 
 def migrate_legacy_database(database_url: str) -> None:
@@ -99,9 +104,9 @@ def migrate_legacy_database(database_url: str) -> None:
         legacy_db.rename(current_db)
 
 
-# FastAPI request workers and the background sync scheduler share this SQLite engine.
+# Engine construction is lazy and performs no filesystem or database I/O. The
+# filename migration and schema migrations run only from FastAPI lifespan.
 validate_test_database_url(DATABASE_URL)
-migrate_legacy_database(DATABASE_URL)
 engine = create_database_engine(DATABASE_URL)
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 signer = URLSafeTimedSerializer(SESSION_SECRET, salt="chainloop-oauth-state")
@@ -269,54 +274,6 @@ def now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def ensure_schema(database_engine: Engine | None = None) -> None:
-    """Create new tables and apply small backwards-compatible SQLite upgrades."""
-    target_engine = database_engine or engine
-    Base.metadata.create_all(target_engine)
-    inspector = inspect(target_engine)
-    tables = set(inspector.get_table_names())
-
-    # These ALTERs intentionally stay additive so existing user data is never rebuilt.
-    if "bikes" in tables:
-        columns = {c["name"] for c in inspector.get_columns("bikes")}
-        if "tracking_start_at" not in columns:
-            with target_engine.begin() as conn:
-                conn.execute(text("ALTER TABLE bikes ADD COLUMN tracking_start_at DATETIME"))
-
-    if "activities" in tables:
-        columns = {c["name"] for c in inspector.get_columns("activities")}
-        if "credited_chain_id" not in columns:
-            with target_engine.begin() as conn:
-                conn.execute(text("ALTER TABLE activities ADD COLUMN credited_chain_id INTEGER"))
-        with target_engine.begin() as conn:
-            conn.execute(text(
-                "CREATE UNIQUE INDEX IF NOT EXISTS uq_activities_source_external_id "
-                "ON activities(source, external_id)"
-            ))
-
-    if "wear_measurements" in tables:
-        columns = {c["name"] for c in inspector.get_columns("wear_measurements")}
-        if "total_km_at_measurement" not in columns:
-            with target_engine.begin() as conn:
-                conn.execute(text("ALTER TABLE wear_measurements ADD COLUMN total_km_at_measurement FLOAT"))
-
-    if "wax_products" in tables:
-        columns = {c["name"] for c in inspector.get_columns("wax_products")}
-        if "archived" not in columns:
-            with target_engine.begin() as conn:
-                conn.execute(text("ALTER TABLE wax_products ADD COLUMN archived BOOLEAN NOT NULL DEFAULT 0"))
-
-    if "chains" in tables:
-        with target_engine.begin() as conn:
-            conn.execute(text(
-                "CREATE UNIQUE INDEX IF NOT EXISTS uq_chains_one_in_use_per_bike "
-                "ON chains(bike_id) WHERE status='IN_USE'"
-            ))
-
-
-ensure_schema()
-
-
 def seed() -> None:
     """Do not invent equipment on a fresh installation.
 
@@ -324,9 +281,6 @@ def seed() -> None:
     bikes, chains and wax products. Existing databases are never modified here.
     """
     return
-
-
-seed()
 
 
 def current_chain(db: Session, bike_id: int) -> Chain | None:
@@ -418,79 +372,6 @@ def record_event(
             metadata_json=json.dumps(metadata) if metadata is not None else None,
         )
     )
-
-
-# --- Data migrations -------------------------------------------------------
-def post_schema_data_migrations(database_engine: Engine | None = None) -> None:
-    """Backfill v0.4 data into v0.5 bookkeeping once, without changing chain totals."""
-    target_engine = database_engine or engine
-    marker_key = "v0.5.0-data-backfill"
-    with Session(target_engine) as db:
-        if db.get(MigrationMarker, marker_key):
-            return
-        # Existing processed rides know their credited chain through their RIDE_ADDED event.
-        processed = db.scalars(
-            select(Activity).where(Activity.processed.is_(True), Activity.credited_chain_id.is_(None))
-        ).all()
-        for activity in processed:
-            event = db.scalar(
-                select(Event)
-                .where(Event.activity_id == activity.id, Event.event_type == "RIDE_ADDED", Event.chain_id.is_not(None))
-                .order_by(Event.id.desc())
-                .limit(1)
-            )
-            if event:
-                activity.credited_chain_id = event.chain_id
-
-        # Migrate successful v0.4 threshold notifications into the per-wax-cycle dedup table.
-        mapping = {
-            "PUSHOVER_WARNING_SENT": "WARNING",
-            "PUSHOVER_CHANGE_SENT": "CHANGE",
-            "PUSHOVER_OVERDUE_SENT": "OVERDUE",
-            "PUSHOVER_NO_SPARE_SENT": "NO_SPARE",
-        }
-        for event_type, level in mapping.items():
-            events = db.scalars(select(Event).where(Event.event_type == event_type, Event.chain_id.is_not(None))).all()
-            for event in events:
-                key = wax_cycle_key(db, event.chain_id, event.created_at)
-                exists = db.scalar(
-                    select(NotificationState).where(
-                        NotificationState.chain_id == event.chain_id,
-                        NotificationState.wax_cycle_key == key,
-                        NotificationState.level == level,
-                    )
-                )
-                if not exists:
-                    db.add(NotificationState(chain_id=event.chain_id, wax_cycle_key=key, level=level, state="SENT", created_at=event.created_at))
-
-        # Do not emit late alerts for thresholds that were deliberately passed during a historical backfill.
-        for chain in db.scalars(select(Chain)).all():
-            bike = db.get(Bike, chain.bike_id)
-            if not bike:
-                continue
-            key = wax_cycle_key(db, chain.id)
-            levels = [
-                ("WARNING", bike.warning_km),
-                ("CHANGE", bike.change_km),
-                ("OVERDUE", bike.overdue_km),
-            ]
-            for level, threshold in levels:
-                if chain.km_since_wax < threshold:
-                    continue
-                exists = db.scalar(
-                    select(NotificationState).where(
-                        NotificationState.chain_id == chain.id,
-                        NotificationState.wax_cycle_key == key,
-                        NotificationState.level == level,
-                    )
-                )
-                if not exists:
-                    db.add(NotificationState(chain_id=chain.id, wax_cycle_key=key, level=level, state="SUPPRESSED", created_at=now()))
-        db.add(MigrationMarker(key=marker_key, applied_at=now()))
-        db.commit()
-
-
-post_schema_data_migrations()
 
 
 def format_local_datetime(value: datetime | None) -> str:
@@ -1019,6 +900,8 @@ def setup_scheduler() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    migrate_legacy_database(DATABASE_URL)
+    migrate_database(engine, Base.metadata)
     setup_scheduler()
     yield
     scheduler_stop.set()

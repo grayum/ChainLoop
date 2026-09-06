@@ -294,7 +294,12 @@ docker compose up -d
 docker compose ps
 ```
 
-v0.7.0 uses additive migrations and does not reset existing chain totals, Strava OAuth data, wax history or processed rides. Existing READY chains without wax history are intentionally flagged for an explicit initial-wax record.
+ChainLoop runs ordered, additive database migrations during controlled application
+startup. Existing pre-ledger databases are validated before adoption, and the
+application refuses to start if the database was migrated by a newer ChainLoop
+version or cannot be classified safely. Migrations do not reset existing chain
+totals, Strava OAuth data, wax history or processed rides. Existing READY chains
+without wax history are intentionally flagged for an explicit initial-wax record.
 
 ## API
 
@@ -319,6 +324,8 @@ python -m pytest
 The test harness permits only in-memory SQLite databases or database files
 inside its disposable pytest directory. Importing the application during a
 test fails before opening a database if `DATABASE_URL` resolves elsewhere.
+Importing application modules never creates or migrates a database; database
+initialization is an application-startup operation.
 
 ## Branding
 
