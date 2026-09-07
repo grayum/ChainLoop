@@ -124,6 +124,41 @@ original meaning, and later schema work receives a new version.
 
 Never replace `data/chainloop.db` with an empty database during an application upgrade.
 
+## Phase 4A security baseline (unreleased)
+
+Before rebuilding, read [SECURITY.md](SECURITY.md). ChainLoop provides no
+access control: verify your authenticated reverse proxy, VPN or equivalent policy
+and prevent direct backend access. The production example retains no published port.
+
+- Generate and set a mandatory `SESSION_SECRET` (at least 32 random bytes):
+  `python -c 'import secrets; print(secrets.token_urlsafe(32))'`.
+  Placeholder secrets no longer work. Rotation invalidates browser sessions and
+  pending OAuth flows, not stored Strava OAuth tokens.
+- Set `APP_BASE_URL` to the canonical external HTTPS origin. If explicitly set,
+  `STRAVA_REDIRECT_URI` must match its `/auth/strava/callback` URL. Trailing base
+  slashes and default URL ports are normalized. Subpath deployment is unsupported.
+- Add `CHAINLOOP_ALLOWED_HOSTS=127.0.0.1,localhost` for the supplied healthcheck.
+  The canonical hostname is automatically allowed. Other alternate hosts need
+  explicit configuration; wildcard hosts and arbitrary forwarded hosts are rejected.
+- HTTP development requires `CHAINLOOP_DEV_ALLOW_HTTP=true` and a loopback
+  canonical URL. Do not enable this for production. See Sandbox instructions.
+- Reload open forms after upgrade. All browser POSTs require a signed session and
+  CSRF field; scripts submitting POSTs need the same flow. GET application APIs
+  retain their functionality, with historical integration-error notes redacted.
+- `/health` now exposes only `status`, `app`, `version`; update consumers relying
+  on its former configuration/sync fields. Interactive API documentation is disabled.
+- CSP blocks inline scripts/styles and framing. Use existing JSON APIs rather
+  than embedding the UI in an iframe. Static assets still support caching.
+- Startup errors omit raw database diagnostics; back up and consult migration
+  guidance before retrying an incompatible database. Migration execution itself
+  is unchanged. Existing raw integration errors remain in SQLite but are hidden
+  from ordinary responses; protect the database and backups as credentials.
+
+Dependency updates are limited to the security-affected Jinja2, python-multipart,
+Starlette and the FastAPI version needed for compatibility. Container non-root
+and filesystem-hardening changes are deferred to Phase 4B; no ownership changes
+are needed for this phase.
+
 ## v0.6.x -> v0.7.0 notes
 
 v0.7.0 adds wax-product archiving and proper wax-cycle numbering. The first recorded wax treatment is **cycle 1**.

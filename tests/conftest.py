@@ -15,6 +15,11 @@ os.environ["CHAINLOOP_TESTING"] = "1"
 os.environ["CHAINLOOP_TEST_TMPDIR"] = str(TEST_DATABASE_ROOT)
 os.environ["DATABASE_URL"] = f"sqlite:///{TEST_DATABASE_ROOT / 'import.db'}"
 os.environ["STRAVA_AUTO_SYNC"] = "false"
+os.environ["SESSION_SECRET"] = "synthetic-test-secret-with-at-least-32-bytes"
+os.environ["APP_BASE_URL"] = "https://testserver"
+os.environ["STRAVA_REDIRECT_URI"] = "https://testserver/auth/strava/callback"
+os.environ["CHAINLOOP_ALLOWED_HOSTS"] = "testserver"
+os.environ["CHAINLOOP_DEV_ALLOW_HTTP"] = "false"
 
 
 def pytest_sessionfinish(session, exitstatus):

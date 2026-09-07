@@ -1,5 +1,8 @@
 import json
+import logging
 import os
+import re
+import secrets
 import threading
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone, timedelta
@@ -10,6 +13,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 from fastapi import FastAPI, Request, Form, HTTPException
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -18,7 +22,9 @@ from sqlalchemy import create_engine, select, func, UniqueConstraint
 from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, Session
 
-from app.migrations import migrate_database
+from app.migrations import migrate_database, MigrationError
+from app.security import (SecuritySettings, BrowserSecurityMiddleware, template_security_context,
+                          new_session, configure_safe_logging)
 
 APP_NAME = "ChainLoop"
 APP_VERSION = "0.7.0"
@@ -31,14 +37,16 @@ STATIC_DIR = BASE_DIR / "static"
 DEFAULT_DATABASE_URL = "sqlite:////data/chainloop.db"
 DATABASE_URL = os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL)
 
-APP_BASE_URL = os.getenv("APP_BASE_URL", "http://localhost:8080").rstrip("/")
-SESSION_SECRET = os.getenv("SESSION_SECRET", "change-me")
+SECURITY = SecuritySettings.from_env()
+configure_safe_logging()
+APP_BASE_URL = SECURITY.base_url
+SESSION_SECRET = SECURITY.secret
 CHAINLOOP_TIMEZONE = os.getenv("CHAINLOOP_TIMEZONE", "Europe/Amsterdam")
 APP_TZ = ZoneInfo(CHAINLOOP_TIMEZONE)
 
 STRAVA_CLIENT_ID = os.getenv("STRAVA_CLIENT_ID", "")
 STRAVA_CLIENT_SECRET = os.getenv("STRAVA_CLIENT_SECRET", "")
-STRAVA_REDIRECT_URI = os.getenv("STRAVA_REDIRECT_URI", f"{APP_BASE_URL}/auth/strava/callback")
+STRAVA_REDIRECT_URI = SECURITY.callback_url
 STRAVA_SCOPES = os.getenv("STRAVA_SCOPES", "activity:read_all")
 STRAVA_API_BASE_URL = os.getenv("STRAVA_API_BASE_URL", "https://www.strava.com/api/v3").rstrip("/")
 STRAVA_VERIFY_TOKEN = os.getenv("STRAVA_VERIFY_TOKEN", "")
@@ -91,6 +99,7 @@ def create_database_engine(database_url: str) -> Engine:
     return create_engine(
         database_url,
         connect_args={"check_same_thread": False, "timeout": 30},
+        hide_parameters=True,
     )
 
 
@@ -108,7 +117,7 @@ def migrate_legacy_database(database_url: str) -> None:
 # filename migration and schema migrations run only from FastAPI lifespan.
 validate_test_database_url(DATABASE_URL)
 engine = create_database_engine(DATABASE_URL)
-templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+templates = Jinja2Templates(directory=str(TEMPLATES_DIR), context_processors=[template_security_context])
 signer = URLSafeTimedSerializer(SESSION_SECRET, salt="chainloop-oauth-state")
 sync_lock = threading.Lock()
 scheduler_stop = threading.Event()
@@ -415,8 +424,8 @@ def send_pushover(title: str, message: str) -> tuple[bool, str | None]:
         )
         response.raise_for_status()
         return True, None
-    except httpx.HTTPError as exc:
-        return False, str(exc)
+    except httpx.HTTPError:
+        return False, "Pushover delivery failed"
 
 
 # NotificationState is deliberately separate from Event: events are audit history,
@@ -644,19 +653,34 @@ def strava_token(db: Session) -> str | None:
     return token.access_token
 
 
-def build_oauth_state() -> str:
-    return signer.dumps({"ts": int(now().timestamp())})
+def build_oauth_state(request: Request) -> str:
+    session = request.state.browser_session
+    if not session:
+        session.update(new_session())
+    nonce = secrets.token_urlsafe(32)
+    session["oauth_nonce"] = nonce
+    return signer.dumps({"nonce": nonce, "sid": session["sid"]})
 
 
-def validate_oauth_state(state: str) -> None:
+def validate_oauth_state(request: Request, state: str) -> None:
     if not state:
         raise HTTPException(400, "Missing OAuth state")
     try:
-        signer.loads(state, max_age=600)
+        payload = signer.loads(state, max_age=600)
     except SignatureExpired as exc:
         raise HTTPException(400, "Expired OAuth state") from exc
     except BadSignature as exc:
         raise HTTPException(400, "Invalid OAuth state") from exc
+    session = request.state.browser_session
+    if (not isinstance(payload, dict) or not session.get("oauth_nonce")
+            or not isinstance(payload.get("nonce"), str)
+            or not isinstance(payload.get("sid"), str)
+            or not secrets.compare_digest(payload["nonce"], session["oauth_nonce"])
+            or not secrets.compare_digest(payload["sid"], session["sid"])):
+        raise HTTPException(400, "OAuth state does not match this browser session")
+    # Normal browser replay is rejected after this cookie update. A copied old
+    # signed cookie cannot be revoked server-side by this stateless session.
+    session.pop("oauth_nonce", None)
 
 
 # Gear metadata is informational; a transient gear lookup failure must not abort ride import.
@@ -852,7 +876,7 @@ def perform_strava_sync(trigger: str = "manual") -> dict:
                 if run:
                     run.completed_at = now()
                     run.success = False
-                    run.error = str(exc)
+                    run.error = "Strava sync failed; check integration configuration and retry"
                     db.commit()
         raise
     finally:
@@ -900,8 +924,17 @@ def setup_scheduler() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    migrate_legacy_database(DATABASE_URL)
-    migrate_database(engine, Base.metadata)
+    if not SECURITY.secure_cookie:
+        logging.getLogger("chainloop.security").warning("Loopback HTTP development mode enabled")
+    try:
+        migrate_legacy_database(DATABASE_URL)
+        migrate_database(engine, Base.metadata)
+    except Exception as exc:
+        # Preserve failure-before-scheduler and migration semantics; keep raw
+        # database errors/tracebacks (which can include paths/parameters) private.
+        match = re.match(r"Migration [0-9]+", str(exc)) if isinstance(exc, MigrationError) else None
+        label = match.group() if match else "Database initialization"
+        raise MigrationError(f"{label} failed; verify database compatibility, backup and permissions") from None
     setup_scheduler()
     yield
     scheduler_stop.set()
@@ -910,8 +943,28 @@ async def lifespan(app: FastAPI):
 
 
 # --- Web application -------------------------------------------------------
-app = FastAPI(title=APP_NAME, version=APP_VERSION, lifespan=lifespan)
+app = FastAPI(title=APP_NAME, version=APP_VERSION, lifespan=lifespan,
+              docs_url=None, redoc_url=None, openapi_url=None, redirect_slashes=False)
+app.add_middleware(BrowserSecurityMiddleware, settings=SECURITY)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error(request: Request, exc: RequestValidationError):
+    # FastAPI's default includes submitted values. OAuth/configuration-related
+    # values must never be reflected by a validation response.
+    return JSONResponse({"detail": "Invalid request input"}, status_code=422)
+
+
+def public_event_note(event: Event) -> str | None:
+    # Old integration errors remain intact in SQLite, but are not rendered back
+    # to clients. Ordinary maintenance notes retain their original text.
+    if event.event_type.startswith("PUSHOVER_") and event.event_type.endswith("_FAILED"):
+        return "Pushover delivery failed"
+    return event.note
+
+
+templates.env.filters["public_event_note"] = public_event_note
 
 
 def latest_sync(db: Session, successful_only: bool = False) -> SyncRun | None:
@@ -1065,7 +1118,7 @@ def index(request: Request):
                 "sync_imported": request.query_params.get("sync_imported"),
                 "sync_processed": request.query_params.get("sync_processed"),
                 "sync_added_km": request.query_params.get("sync_added_km"),
-                "sync_error": request.query_params.get("sync_error"),
+                "sync_error": bool(request.query_params.get("sync_error")),
                 "backfilled_count": request.query_params.get("backfilled_count"),
                 "backfilled_km": request.query_params.get("backfilled_km"),
                 "strava_configured": bool(STRAVA_CLIENT_ID and STRAVA_CLIENT_SECRET),
@@ -1093,7 +1146,7 @@ def favicon_png():
 
 # --- Routes: Strava OAuth and synchronization -----------------------------
 @app.get("/auth/strava")
-def strava_auth():
+def strava_auth(request: Request):
     if not STRAVA_CLIENT_ID:
         raise HTTPException(503, "STRAVA_CLIENT_ID is not configured")
     query = urlencode({
@@ -1102,14 +1155,14 @@ def strava_auth():
         "response_type": "code",
         "approval_prompt": "auto",
         "scope": STRAVA_SCOPES,
-        "state": build_oauth_state(),
+        "state": build_oauth_state(request),
     })
     return RedirectResponse(f"https://www.strava.com/oauth/authorize?{query}")
 
 
 @app.get("/auth/strava/callback")
-def strava_callback(code: str, state: str = "", scope: str = ""):
-    validate_oauth_state(state)
+def strava_callback(request: Request, code: str, state: str = "", scope: str = ""):
+    validate_oauth_state(request, state)
     response = httpx.post(
         "https://www.strava.com/oauth/token",
         data={
@@ -1144,10 +1197,10 @@ def strava_callback(code: str, state: str = "", scope: str = ""):
 def sync_strava(ui: bool = Form(False)):
     try:
         result = perform_strava_sync(trigger="manual")
-    except Exception as exc:
+    except Exception:
         if ui:
-            return RedirectResponse(f"/?{urlencode({'sync_error': str(exc)})}", status_code=303)
-        raise HTTPException(502, f"Strava sync failed: {exc}") from exc
+            return RedirectResponse("/?sync_error=1", status_code=303)
+        raise HTTPException(502, "Strava sync failed; check integration configuration and retry") from None
     if ui:
         return RedirectResponse(
             f"/?sync_imported={result['imported']}&sync_processed={result['processed']}&sync_added_km={result['added_km']:.2f}",
@@ -2005,25 +2058,16 @@ def api_chain_history(chain_id: int):
             "created_at": event.created_at.isoformat(),
             "activity_id": event.activity_id,
             "distance_km": event.distance_km,
-            "note": event.note,
+            "note": public_event_note(event),
             "metadata": json.loads(event.metadata_json) if event.metadata_json else None,
         } for event in events]
 
 
 @app.get("/health")
 def health():
-    with Session(engine) as db:
-        last_ok = latest_sync(db, successful_only=True)
-        last = latest_sync(db)
-    return {
-        "status": "ok",
-        "app": APP_NAME,
-        "version": app.version,
-        "strava_api_base_url": STRAVA_API_BASE_URL,
-        "pushover_configured": bool(PUSHOVER_APP_TOKEN and PUSHOVER_USER_KEY),
-        "strava_auto_sync": STRAVA_AUTO_SYNC,
-        "strava_sync_times": configured_sync_times_display() if STRAVA_AUTO_SYNC else "",
-        "timezone": CHAINLOOP_TIMEZONE,
-        "last_successful_sync": last_ok.completed_at.isoformat() if last_ok and last_ok.completed_at else None,
-        "last_sync_error": last.error if last and not last.success else None,
-    }
+    try:
+        with Session(engine) as db:
+            db.execute(select(1))
+    except Exception:
+        return JSONResponse({"status": "unavailable", "app": APP_NAME, "version": app.version}, status_code=503)
+    return {"status": "ok", "app": APP_NAME, "version": app.version}

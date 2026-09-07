@@ -1,3 +1,7 @@
+# Private/internal deployment only. ChainLoop has no authentication or authorization.
+# Enforce external access policy (authenticated proxy, VPN, IP allowlist, etc.)
+# and prevent access that bypasses it. Do not publish the application port.
+# See SECURITY.md before deployment.
 services:
   chainloop:
     build: .
@@ -8,6 +12,7 @@ services:
     environment:
       DATABASE_URL: "${DATABASE_URL:-sqlite:////data/chainloop.db}"
       APP_BASE_URL: "${APP_BASE_URL:?Set APP_BASE_URL in .env}"
+      CHAINLOOP_ALLOWED_HOSTS: "${CHAINLOOP_ALLOWED_HOSTS:-127.0.0.1,localhost}"
 
       STRAVA_CLIENT_ID: "${STRAVA_CLIENT_ID:?Set STRAVA_CLIENT_ID in .env}"
       STRAVA_CLIENT_SECRET: "${STRAVA_CLIENT_SECRET:?Set STRAVA_CLIENT_SECRET in .env}"
@@ -25,6 +30,10 @@ services:
       PUSHOVER_APP_TOKEN: "${PUSHOVER_APP_TOKEN:?Set PUSHOVER_APP_TOKEN in .env}"
       PUSHOVER_USER_KEY: "${PUSHOVER_USER_KEY:?Set PUSHOVER_USER_KEY in .env}"
 
+    # Attach your operator-managed access-policy middleware here, for example:
+    # traefik.http.routers.chainloop.middlewares=your-auth-policy@file
+    # TLS labels below do not authenticate callers. Equivalent external VPN/
+    # firewall access policy is also supported; verify it before deployment.
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=traefik"

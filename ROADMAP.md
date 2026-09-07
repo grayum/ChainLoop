@@ -45,6 +45,16 @@
 - Multiple daily Strava sync times (`STRAVA_SYNC_TIMES`) with `STRAVA_SYNC_TIME` backwards compatibility.
 - Dedicated `UPGRADE.md`.
 
+## Security baseline — before further integration work
+
+- Phase 4A (unreleased): external-access-control documentation; CSRF and signed
+  browser sessions; OAuth correlation; mandatory secrets; secure cookies; canonical
+  URL/Host validation; CSP/headers; health/error redaction; security dependency updates.
+- Phase 4B (not implemented): full input/external-payload validation, outbound URL
+  constraints, non-root/container filesystem hardening and further abuse controls.
+- Native authentication/authorization is not provided; access policy remains an
+  explicit deployment responsibility.
+
 ## Priority 6 — Home Assistant
 
 - Expanded REST API for current state, maintenance, next chain, km remaining, wear, last wax and sync state.

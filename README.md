@@ -8,6 +8,20 @@
 SQLite is the authoritative datastore; Strava supplies rides, Pushover supplies maintenance alerts,
 and Home Assistant can consume the read-only API.
 
+## Deployment security
+
+**ChainLoop does not provide built-in authentication or authorization. It is designed
+for private/internal deployment behind an authenticated reverse proxy, VPN, or
+equivalent access-control layer. Do not expose ChainLoop directly to the public Internet.**
+
+Anyone who can reach ChainLoop can read application data and perform administrative
+and maintenance actions. Operators must enforce external access policy and prevent
+backend access that bypasses it. ChainLoop does not consume proxy identity headers.
+The preferred Docker/Traefik example does not publish the application port.
+
+Read [SECURITY.md](SECURITY.md) for the trust boundary, required configuration,
+CSRF/session behavior, TLS responsibilities and explicit local HTTP development mode.
+
 ## Current release: v0.7.0
 
 v0.7.0 is the administration and wax-cycle release:
@@ -161,7 +175,15 @@ cp .env.example .env
 cp docker-compose.yaml.example docker-compose.yaml
 ```
 
-Edit both files for your deployment.
+Edit both files for your deployment. Generate the required session secret with:
+
+```bash
+python -c 'import secrets; print(secrets.token_urlsafe(32))'
+```
+
+Set `SESSION_SECRET` to the generated value. `APP_BASE_URL` must be the canonical
+external HTTPS origin; a matching explicit `STRAVA_REDIRECT_URI` remains supported.
+Configure external access control before starting the production deployment.
 
 Do not commit `.env`, `docker-compose.yaml`, or the contents of `data/`.
 
@@ -237,7 +259,9 @@ See `.env.example`. Typical values look like:
 CHAINLOOP_HOST=chainloop.example.com
 APP_BASE_URL=https://chainloop.example.com
 DATABASE_URL=sqlite:////data/chainloop.db
-SESSION_SECRET=replace-with-a-long-random-secret
+SESSION_SECRET=<generated-random-secret>
+CHAINLOOP_ALLOWED_HOSTS=127.0.0.1,localhost
+CHAINLOOP_DEV_ALLOW_HTTP=false
 
 STRAVA_CLIENT_ID=
 STRAVA_CLIENT_SECRET=
@@ -260,6 +284,9 @@ PUSHOVER_USER_KEY=
 Port 8080 is not published on the host; Traefik talks directly to `chainloop:8080`.
 
 If your Docker network, certificate resolver or reverse proxy differs, edit your local `docker-compose.yaml` accordingly.
+The example's TLS router is not an access policy: attach your own authentication
+middleware or equivalent VPN/firewall policy and restrict backend network membership.
+TLS/HSTS and targeted rate limits belong at the reverse proxy.
 
 ## Upgrading an existing installation
 
@@ -303,7 +330,10 @@ without wax history are intentionally flagged for an explicit initial-wax record
 
 ## API
 
-Useful endpoints include:
+Existing read-only API endpoints remain available through your deployment's external
+access policy. Home Assistant must use that policy too; it receives no automatic bypass.
+`/health` returns only `status`, `app` and `version` (503 if its database check fails).
+Interactive API documentation is disabled. Useful endpoints include:
 
 ```text
 GET /health

@@ -14,7 +14,7 @@
         <td>{% if e.chain_id and chains.get(e.chain_id) %}<a class="mono" href="/chains/{{ e.chain_id }}">{{ chains.get(e.chain_id).code }}</a>{% else %}—{% endif %}</td>
         <td>{% if e.activity_id and activities.get(e.activity_id) %}<a href="/activities/{{ e.activity_id }}">{{ activities.get(e.activity_id).raw_name or activities.get(e.activity_id).external_id }}</a>{% else %}—{% endif %}</td>
         <td>{{ ('%.2f km'|format(e.distance_km)) if e.distance_km is not none else '—' }}</td>
-        <td>{{ e.note or '—' }}</td>
+        <td>{{ (e|public_event_note) or '—' }}</td>
       </tr>
       {% endfor %}
     </table>

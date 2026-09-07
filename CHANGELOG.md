@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- Phase 4A: documented external access control as an operator responsibility;
+  ChainLoop has no authentication/authorization or proxy identity handling.
+- Added session-bound CSRF checks before browser mutations, signed eight-hour
+  browser sessions, mandatory random session secrets and session-correlated
+  Strava OAuth state with its existing ten-minute expiry.
+- Added strict canonical URL/Host validation, secure production cookies and an
+  explicit loopback-only HTTP development exception for Docker Sandbox.
+- Added restrictive CSP and browser security headers; moved chart JavaScript and
+  inline styling into static assets while preserving contextual output encoding.
+- Reduced health output, redacted integration errors and callback access logs,
+  disabled interactive API docs and prevented validation responses echoing input.
+- Updated Jinja2 to 3.1.6, python-multipart to 0.0.31, Starlette to 1.3.1 and
+  FastAPI to 0.136.0 for concrete security advisories/framework compatibility.
+- Preserved accounting, wax cycles, migration execution and notification rules;
+  broader validation/outbound URL/container hardening remain Phase 4B.
+
 - Added an ordered, append-only SQLite schema migration ledger with explicit
   current-version and postcondition validation.
 - Added safe adoption of supported pre-ledger ChainLoop databases while

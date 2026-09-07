@@ -2,13 +2,13 @@
 {% block content %}
   {% if not strava_configured %}<div class="note">Strava credentials are not configured in <span class="mono">.env</span>.</div>{% endif %}
   {% if sync_imported is not none %}<div class="note success">Strava synced successfully: <strong>{{ sync_imported }}</strong> new activities imported, <strong>{{ sync_processed }}</strong> counted, <strong>{{ sync_added_km }}</strong> km added.</div>{% endif %}
-  {% if sync_error %}<div class="note error">Strava sync failed: {{ sync_error }}</div>{% endif %}
+  {% if sync_error %}<div class="note error">Strava sync failed. Check integration configuration and retry.</div>{% endif %}
   {% if backfilled_count is not none %}<div class="note success">Historical setup complete: <strong>{{ backfilled_count }}</strong> rides backfilled for <strong>{{ backfilled_km }} km</strong>. Pushover notifications were suppressed during the backfill.</div>{% endif %}
 
   <div class="toolbar">
-    <form method="post" action="/sync/strava" style="margin:0"><input type="hidden" name="ui" value="true"><button class="primary">Sync Strava</button></form>
+    <form method="post" action="/sync/strava" class="no-margin"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="ui" value="true"><button class="primary">Sync Strava</button></form>
     {% if strava_configured %}<a class="btn" href="/auth/strava">{% if strava_connected %}Reconnect Strava{% else %}Connect Strava{% endif %}</a>{% endif %}
-    {% if pushover_configured %}<form method="post" action="/pushover/test" style="margin:0"><button>Test Pushover</button></form>{% endif %}
+    {% if pushover_configured %}<form method="post" action="/pushover/test" class="no-margin"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button>Test Pushover</button></form>{% endif %}
     <span class="pill {% if not strava_connected %}off{% endif %}">Strava {% if strava_connected %}connected{% else %}not connected{% endif %}</span>
     <span class="pill {% if not pushover_configured %}off{% endif %}">Pushover {% if pushover_configured %}configured{% else %}not configured{% endif %}</span>
   </div>
@@ -18,7 +18,7 @@
     <div class="statline small">
       <div><strong>Automatic sync:</strong> {% if auto_sync %}<span class="ok">enabled</span> at {{ sync_times }} ({{ timezone_name }}){% else %}<span class="muted">disabled</span>{% endif %}</div>
       <div><strong>Last successful sync:</strong> {{ last_successful_sync.completed_at|localdt if last_successful_sync and last_successful_sync.completed_at else 'never' }}</div>
-      {% if last_sync and not last_sync.success %}<div class="bad"><strong>Last sync error:</strong> {{ last_sync.error }}</div>{% endif %}
+      {% if last_sync and not last_sync.success %}<div class="bad"><strong>Last sync error:</strong> Strava sync failed. Check integration configuration and retry.</div>{% endif %}
       {% if last_sync and last_sync.success %}<div><strong>Last result:</strong> {{ last_sync.imported }} imported · {{ last_sync.processed }} counted · {{ '%.1f'|format(last_sync.added_km) }} km added · {{ last_sync.trigger }}</div>{% endif %}
     </div>
   </div>
@@ -30,7 +30,7 @@
     {% set active = chains|selectattr('bike_id','equalto',b.id)|selectattr('status','equalto','IN_USE')|list|first %}
     {% set svc = service_by_bike.get(b.id) %}
     <div class="card">
-      <div class="row" style="align-items:center"><div><h3>{{ b.name }}</h3></div><div style="flex:0"><span class="pill {{ svc.css if svc.css != 'ok' else '' }}">{{ svc.emoji }} {{ svc.label }}</span></div></div>
+      <div class="align-center row"><div><h3>{{ b.name }}</h3></div><div class="flex-zero"><span class="pill {{ svc.css if svc.css != 'ok' else '' }}">{{ svc.emoji }} {{ svc.label }}</span></div></div>
       <div class="statline">
         <div><strong>Active chain:</strong> {% if active %}<a class="mono" href="/chains/{{ active.id }}">{{ active.code }}</a>{% else %}—{% endif %}</div>
         <div><strong>Strava gear:</strong> <span class="mono">{{ b.strava_gear_id or 'not mapped' }}</span></div>
@@ -50,14 +50,14 @@
         {% set denominator = b.change_km if active.km_since_wax < b.overdue_km else b.overdue_km %}
         {% set pct = ((active.km_since_wax / denominator) * 100) if denominator else 0 %}
         <div class="small muted">{{ '%.1f'|format(active.km_since_wax) }} / {{ '%.0f'|format(b.change_km) }} km change target</div>
-        <div class="progress {{ svc.css }}"><span style="width:{{ [pct,100]|min }}%"></span></div>
+        <progress class="progress {{ svc.css }}" max="100" value="{{ [pct,100]|min }}" aria-label="Distance towards chain change">{{ pct }}%</progress>
       {% endif %}
-      <div class="muted small" style="margin-top:.5rem">Warning {{ b.warning_km }} km · Change {{ b.change_km }} km · Overdue {{ b.overdue_km }} km</div>
+      <div class="space-top muted small">Warning {{ b.warning_km }} km · Change {{ b.change_km }} km · Overdue {{ b.overdue_km }} km</div>
 
       {% if active and not wax_details_by_chain.get(active.id) %}<div class="note error">This installed chain has no recorded wax treatment. Record its initial wax on the chain page so cycle numbering and wax statistics are correct.</div>{% endif %}
       {% if ready_by_bike.get(b.id) == 0 and active and active.km_since_wax >= b.change_km %}<div class="note error">⚠️ No waxed spare chain is ready.</div>{% endif %}
 
-      <form method="post" action="/bikes/{{ b.id }}/map-gear">
+      <form method="post" action="/bikes/{{ b.id }}/map-gear"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <label>Map Strava gear ID</label>
         <select name="gear_id" required>
           {% if b.strava_gear_id %}<option value="{{ b.strava_gear_id }}">Current: {{ b.strava_gear_id }}</option>{% endif %}
@@ -71,7 +71,7 @@
         {% set init_summary = init_summary_by_bike.get(b.id) %}
         {% if b.strava_gear_id and active and init_activities %}
         <div class="note"><strong>Historical setup available</strong><br>{{ init_summary.ride_count }} imported rides / {{ init_summary.total_km }} km are available. Historical backfill does not send Pushover alerts.</div>
-        <form method="post" action="/bikes/{{ b.id }}/tracking/initialize-history">
+        <form method="post" action="/bikes/{{ b.id }}/tracking/initialize-history"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
           <input type="hidden" name="chain_id" value="{{ active.id }}">
           <label>First ride on {{ active.code }}</label>
           <select name="start_activity_id" required>{% for a in init_activities %}<option value="{{ a.id }}">{{ a.occurred_at|localdt }} · {{ '%.1f'|format(a.distance_km) }} km · {{ a.raw_name or 'Unnamed ride' }}</option>{% endfor %}</select>
@@ -80,11 +80,11 @@
           <button class="primary">Initialize from history &amp; backfill</button>
         </form>
         {% endif %}
-        <form method="post" action="/bikes/{{ b.id }}/tracking/start"><button>Start tracking from now instead</button></form>
+        <form method="post" action="/bikes/{{ b.id }}/tracking/start"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button>Start tracking from now instead</button></form>
       {% endif %}
 
       {% if active %}
-      <form method="post" action="/chains/{{ active.id }}/wear">
+      <form method="post" action="/chains/{{ active.id }}/wear"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <label>Wear measurement (%)</label><input name="wear_percent" type="number" step="0.01" min="0" required>
         <input type="hidden" name="timing" value="before_wax">
         <label>Optional note</label><input name="note" placeholder="Default timing: before waxing">
@@ -92,7 +92,7 @@
       </form>
       {% endif %}
 
-      <form method="post" action="/bikes/{{ b.id }}/swap">
+      <form method="post" action="/bikes/{{ b.id }}/swap"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <label>Swap to ready chain</label>
         <select name="chain_id" required>{% for c in chains if c.bike_id==b.id and c.status=='READY' and wax_details_by_chain.get(c.id) %}<option value="{{ c.id }}">{{ c.code }}</option>{% endfor %}</select>
         <button {% if ready_by_bike.get(b.id)==0 %}disabled{% endif %}>Swap chain</button>
