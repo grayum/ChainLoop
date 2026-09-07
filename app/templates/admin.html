@@ -8,13 +8,13 @@
   <div class="card">
     <h3>Riders</h3>
     {% for p in people %}
-    <form method="post" action="/admin/people/{{ p.id }}" class="inline-admin">
+    <form method="post" action="/admin/people/{{ p.id }}" class="inline-admin"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <input name="name" value="{{ p.name }}" required>
       <button>Save</button>
     </form>
     {% else %}<p class="muted small">No riders yet. Add one first.</p>{% endfor %}
     <hr>
-    <form method="post" action="/admin/people">
+    <form method="post" action="/admin/people"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <label>Add rider</label><input name="name" required placeholder="Rider name">
       <button class="primary">Add rider</button>
     </form>
@@ -24,7 +24,7 @@
     <h3>Chain specifications</h3>
     {% for s in specs %}
     <details class="admin-details"><summary>{{ s.name }}</summary>
-      <form method="post" action="/admin/specs/{{ s.id }}">
+      <form method="post" action="/admin/specs/{{ s.id }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <label>Name</label><input name="name" value="{{ s.name }}" required>
         <div class="row"><div><label>Manufacturer</label><input name="manufacturer" value="{{ s.manufacturer or '' }}"></div><div><label>Model</label><input name="model" value="{{ s.model or '' }}"></div></div>
         <div class="row"><div><label>Speeds</label><input name="speeds" type="number" min="1" value="{{ s.speeds or '' }}"></div><div><label>Links</label><input name="link_count" type="number" min="1" value="{{ s.link_count or '' }}"></div></div>
@@ -33,7 +33,7 @@
     </details>
     {% else %}<p class="muted small">No chain specifications yet.</p>{% endfor %}
     <hr>
-    <form method="post" action="/admin/specs">
+    <form method="post" action="/admin/specs"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <label>New specification name</label><input name="name" required placeholder="e.g. 12-speed road chain">
       <div class="row"><div><label>Manufacturer</label><input name="manufacturer"></div><div><label>Model</label><input name="model"></div></div>
       <div class="row"><div><label>Speeds</label><input name="speeds" type="number" min="1"></div><div><label>Links</label><input name="link_count" type="number" min="1"></div></div>
@@ -47,7 +47,7 @@
   {% for b in bikes %}
   <div class="card">
     <h3>{{ b.name }}</h3>
-    <form method="post" action="/admin/bikes/{{ b.id }}">
+    <form method="post" action="/admin/bikes/{{ b.id }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <label>Name</label><input name="name" value="{{ b.name }}" required>
       <div class="row">
         <div><label>Rider</label><select name="person_id" required>{% for p in people %}<option value="{{ p.id }}" {% if p.id==b.person_id %}selected{% endif %}>{{ p.name }}</option>{% endfor %}</select></div>
@@ -61,7 +61,7 @@
   <div class="card">
     <h3>Add bike</h3>
     {% if people and specs %}
-    <form method="post" action="/admin/bikes">
+    <form method="post" action="/admin/bikes"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <label>Name</label><input name="name" required>
       <div class="row"><div><label>Rider</label><select name="person_id">{% for p in people %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}</select></div><div><label>Chain specification</label><select name="chain_spec_id">{% for s in specs %}<option value="{{ s.id }}">{{ s.name }}</option>{% endfor %}</select></div></div>
       <div class="row"><div><label>⚠️ Warning km</label><input name="warning_km" type="number" step="0.1" value="500"></div><div><label>🔧 Change km</label><input name="change_km" type="number" step="0.1" value="600"></div><div><label>⛔️ Overdue km</label><input name="overdue_km" type="number" step="0.1" value="800"></div></div>
@@ -78,7 +78,7 @@
     {% for c in chains %}
     {% set cyc = cycle_by_chain.get(c.id) %}
     <tr><td><a href="/chains/{{ c.id }}" class="mono">{{ c.code }}</a></td><td>{% for b in bikes if b.id==c.bike_id %}{{ b.name }}{% endfor %}</td><td>{{ c.status }}</td><td>{{ cyc.current_cycle if cyc and cyc.current_cycle else 'not started' }}</td><td>{{ '%.1f'|format(c.total_km) }}</td><td>
-      <form method="post" action="/admin/chains/{{ c.id }}" class="compact-form">
+      <form method="post" action="/admin/chains/{{ c.id }}" class="compact-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input name="code" value="{{ c.code }}" required>
         <select name="bike_id">{% for b in bikes %}<option value="{{ b.id }}" {% if b.id==c.bike_id %}selected{% endif %}>{{ b.name }}</option>{% endfor %}</select>
         <button>Save</button>
@@ -92,7 +92,7 @@
 <div class="card">
   <h3>Add physical chain</h3>
   {% if bikes %}
-  <form method="post" action="/admin/chains">
+  <form method="post" action="/admin/chains"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <div class="row"><div><label>Chain ID/code</label><input name="code" required placeholder="ROAD-01"></div><div><label>Bike</label><select name="bike_id">{% for b in bikes %}<option value="{{ b.id }}">{{ b.name }}</option>{% endfor %}</select></div><div><label>Initial condition</label><select name="condition"><option value="new">New / not yet waxed</option><option value="ready">Already waxed and ready</option></select></div></div>
     <div class="row"><div><label>Existing lifetime km</label><input name="initial_total_km" type="number" min="0" step="0.01" value="0"></div><div><label>Existing wear % (optional)</label><input name="initial_wear_percent" type="number" min="0" step="0.01"></div><div><label>First used date (optional)</label><input name="first_used_date" type="date"></div></div>
     <div class="row"><div><label>Initial wax product (required if READY)</label><select name="wax_product_id"><option value="">—</option>{% for w in active_wax_products %}<option value="{{ w.id }}">{{ w.name }}</option>{% endfor %}</select></div><div><label>Initial wax date</label><input name="wax_date" type="date"></div></div>
@@ -106,15 +106,15 @@
 <div class="grid">
   {% for w in wax_products %}
   <div class="card {% if w.archived %}archived-card{% endif %}">
-    <div class="row" style="align-items:center"><div><h3>{{ w.name }}</h3></div><div style="flex:0"><span class="pill {% if w.archived %}off{% endif %}">{{ 'archived' if w.archived else 'active' }}</span></div></div>
+    <div class="align-center row"><div><h3>{{ w.name }}</h3></div><div class="flex-zero"><span class="pill {% if w.archived %}off{% endif %}">{{ 'archived' if w.archived else 'active' }}</span></div></div>
     <div class="muted small">Used by {{ wax_usage.get(w.id, 0) }} wax event(s)</div>
-    <form method="post" action="/admin/waxes/{{ w.id }}"><label>Name</label><input name="name" value="{{ w.name }}" required><label>Notes</label><textarea name="notes">{{ w.notes or '' }}</textarea><button>Save</button></form>
+    <form method="post" action="/admin/waxes/{{ w.id }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><label>Name</label><input name="name" value="{{ w.name }}" required><label>Notes</label><textarea name="notes">{{ w.notes or '' }}</textarea><button>Save</button></form>
     <div class="toolbar">
-      {% if w.archived %}<form method="post" action="/admin/waxes/{{ w.id }}/reactivate" style="margin:0"><button>Reactivate</button></form>{% else %}<form method="post" action="/admin/waxes/{{ w.id }}/archive" style="margin:0"><button>Archive</button></form>{% endif %}
-      {% if wax_usage.get(w.id, 0)==0 %}<form method="post" action="/admin/waxes/{{ w.id }}/delete" style="margin:0"><button class="danger">Delete unused</button></form>{% endif %}
+      {% if w.archived %}<form method="post" action="/admin/waxes/{{ w.id }}/reactivate" class="no-margin"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button>Reactivate</button></form>{% else %}<form method="post" action="/admin/waxes/{{ w.id }}/archive" class="no-margin"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button>Archive</button></form>{% endif %}
+      {% if wax_usage.get(w.id, 0)==0 %}<form method="post" action="/admin/waxes/{{ w.id }}/delete" class="no-margin"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="danger">Delete unused</button></form>{% endif %}
     </div>
   </div>
   {% endfor %}
-  <div class="card"><h3>Add wax product</h3><form method="post" action="/admin/waxes"><label>Name</label><input name="name" required><label>Notes</label><textarea name="notes"></textarea><button class="primary">Add wax product</button></form></div>
+  <div class="card"><h3>Add wax product</h3><form method="post" action="/admin/waxes"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><label>Name</label><input name="name" required><label>Notes</label><textarea name="notes"></textarea><button class="primary">Add wax product</button></form></div>
 </div>
 {% endblock %}
