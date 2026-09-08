@@ -20,6 +20,8 @@ from starlette.responses import JSONResponse, Response
 SESSION_COOKIE = "chainloop_session"
 SESSION_SECONDS = 8 * 60 * 60
 MAX_FORM_BYTES = 64 * 1024
+MAX_WEBHOOK_BYTES = 16 * 1024
+MAX_QUERY_BYTES = 4 * 1024
 TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_-]{43}\Z")
 # This endpoint is an external callback stub, not a browser mutation. Do not
 # extend this exception to a prefix or to integration control endpoints.
@@ -232,11 +234,31 @@ class BrowserSecurityMiddleware:
                     raise ValueError("Untrusted host")
                 if not scope["path"].startswith("/"):
                     raise ValueError("Invalid request path")
+                if len(scope.get("query_string", b"")) > MAX_QUERY_BYTES:
+                    raise ValueError("Query string too large")
             except ValueError:
                 return await reject(400, "Invalid Host or request path")
 
             mutation = scope["method"] not in {"GET", "HEAD", "OPTIONS"}
-            if mutation and (scope["method"], scope["path"]) not in CSRF_EXEMPT:
+            exempt = (scope["method"], scope["path"]) in CSRF_EXEMPT
+            if mutation:
+                body_limit = MAX_WEBHOOK_BYTES if exempt else MAX_FORM_BYTES
+                content_length = request.headers.get("content-length")
+                if content_length:
+                    try:
+                        if int(content_length) < 0 or int(content_length) > body_limit:
+                            return await reject(413, "Request body is too large")
+                    except ValueError:
+                        return await reject(400, "Invalid Content-Length")
+                body = bytearray()
+                async for chunk in request.stream():
+                    if len(body) + len(chunk) > body_limit:
+                        return await reject(413, "Request body is too large")
+                    body.extend(chunk)
+                async def replay():
+                    return {"type": "http.request", "body": bytes(body), "more_body": False}
+                receive = replay
+            if mutation and not exempt:
                 if not session:
                     return await reject(403, "Invalid or expired CSRF session. Reload the page and try again.")
                 origins = request.headers.getlist("origin")
@@ -255,16 +277,9 @@ class BrowserSecurityMiddleware:
                     return await reject(403, "Invalid request origin")
                 # Bound parsing before token validation. No file uploads are
                 # supported, so parsing must never create temporary files.
-                body = bytearray()
-                async for chunk in request.stream():
-                    body.extend(chunk)
-                    if len(body) > MAX_FORM_BYTES:
-                        return await reject(413, "Form request is too large")
                 content_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
                 if content_type not in {"application/x-www-form-urlencoded", "multipart/form-data"}:
                     return await reject(403, "A form CSRF token is required")
-                async def replay():
-                    return {"type": "http.request", "body": bytes(body), "more_body": False}
                 parsed = Request(scope, replay)
                 try:
                     async with parsed.form(max_files=0, max_fields=100, max_part_size=MAX_FORM_BYTES) as form:
@@ -276,7 +291,6 @@ class BrowserSecurityMiddleware:
                     return await reject(403, "Invalid CSRF form")
                 if not valid:
                     return await reject(403, "Invalid CSRF token. Reload the page and try again.")
-                receive = replay
             await self.app(scope, receive, secured_send)
         except Exception as exc:
             # Never log raw exceptions: SQL parameters, URLs or integration

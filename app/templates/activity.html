@@ -21,9 +21,9 @@
         <div><label>Bike</label><select name="bike_id"><option value="">No bike / unassigned</option>{% for b in bikes %}<option value="{{ b.id }}" {% if activity.bike_id==b.id %}selected{% endif %}>{{ b.name }}</option>{% endfor %}</select></div>
         <div><label>Chain to credit</label><select name="chain_id"><option value="">Do not count yet</option>{% for c in chains %}<option value="{{ c.id }}" {% if activity.credited_chain_id==c.id %}selected{% endif %}>{{ c.code }}</option>{% endfor %}</select></div>
       </div>
-      <label>Distance (km)</label><input name="distance_km" type="number" min="0" step="0.001" value="{{ '%.3f'|format(activity.distance_km) }}" required>
+      <label>Distance (km)</label><input name="distance_km" type="number" min="0" max="1000000" step="0.001" value="{{ '%.3f'|format(activity.distance_km) }}" required>
       <label class="normal-weight"><input type="checkbox" name="excluded" value="true" {% if activity.excluded %}checked{% endif %} class="auto-width"> Exclude this activity from chain accounting</label>
-      <label>Correction reason (required)</label><textarea name="note" required placeholder="e.g. Wrong bike selected in Strava"></textarea>
+      <label>Correction reason (required)</label><textarea name="note" maxlength="2000" required placeholder="e.g. Wrong bike selected in Strava"></textarea>
       <button class="primary">Save correction</button>
     </form>
   </div>

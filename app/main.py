@@ -9,7 +9,6 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from statistics import mean, median
 from urllib.parse import urlencode
-from zoneinfo import ZoneInfo
 
 import httpx
 from fastapi import FastAPI, Request, Form, HTTPException
@@ -19,12 +18,21 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 from sqlalchemy import create_engine, select, func, UniqueConstraint
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, Session
 
 from app.migrations import migrate_database, MigrationError
 from app.security import (SecuritySettings, BrowserSecurityMiddleware, template_security_context,
                           new_session, configure_safe_logging)
+from app.validation import (
+    MAX_ACTIVITY_RESPONSE, MAX_CODE, MAX_DISTANCE_KM, MAX_GEAR_RESPONSE, MAX_NAME,
+    MAX_NOTE, MAX_THRESHOLD_KM, MAX_TOKEN_RESPONSE, RIDE_TYPES, bounded_json_request,
+    bounded_text, chain_code, finite_number, gear_id as validated_gear_id, local_date,
+    optional_finite_number, optional_integer, optional_positive_id, positive_id,
+    strict_form_bool, validate_strava_activity, validate_strava_api_base,
+    validate_strava_gear_payload, validate_strava_token_payload, validate_timezone,
+)
 
 APP_NAME = "ChainLoop"
 APP_VERSION = "0.7.0"
@@ -42,21 +50,41 @@ configure_safe_logging()
 APP_BASE_URL = SECURITY.base_url
 SESSION_SECRET = SECURITY.secret
 CHAINLOOP_TIMEZONE = os.getenv("CHAINLOOP_TIMEZONE", "Europe/Amsterdam")
-APP_TZ = ZoneInfo(CHAINLOOP_TIMEZONE)
+APP_TZ = validate_timezone(CHAINLOOP_TIMEZONE)
 
 STRAVA_CLIENT_ID = os.getenv("STRAVA_CLIENT_ID", "")
 STRAVA_CLIENT_SECRET = os.getenv("STRAVA_CLIENT_SECRET", "")
 STRAVA_REDIRECT_URI = SECURITY.callback_url
 STRAVA_SCOPES = os.getenv("STRAVA_SCOPES", "activity:read_all")
-STRAVA_API_BASE_URL = os.getenv("STRAVA_API_BASE_URL", "https://www.strava.com/api/v3").rstrip("/")
+_outbound_mock_value = os.getenv("CHAINLOOP_DEV_ALLOW_OUTBOUND_MOCKS", "false").strip().lower()
+if _outbound_mock_value not in {"true", "false"}:
+    raise RuntimeError("CHAINLOOP_DEV_ALLOW_OUTBOUND_MOCKS must be true or false")
+ALLOW_OUTBOUND_MOCKS = _outbound_mock_value == "true" and (
+    os.getenv("CHAINLOOP_TESTING") == "1" or os.getenv("CHAINLOOP_DEV_ALLOW_HTTP", "false").lower() == "true"
+)
+STRAVA_API_BASE_URL = validate_strava_api_base(
+    os.getenv("STRAVA_API_BASE_URL", "https://www.strava.com/api/v3"), ALLOW_OUTBOUND_MOCKS
+)
 STRAVA_VERIFY_TOKEN = os.getenv("STRAVA_VERIFY_TOKEN", "")
-STRAVA_AUTO_SYNC = os.getenv("STRAVA_AUTO_SYNC", "true").strip().lower() in {"1", "true", "yes", "on"}
+_auto_sync_value = os.getenv("STRAVA_AUTO_SYNC", "true").strip().lower()
+if _auto_sync_value not in {"1", "true", "yes", "on", "0", "false", "no", "off"}:
+    raise RuntimeError("STRAVA_AUTO_SYNC must be a recognized boolean")
+STRAVA_AUTO_SYNC = _auto_sync_value in {"1", "true", "yes", "on"}
 STRAVA_SYNC_TIME = os.getenv("STRAVA_SYNC_TIME", "21:00").strip()
 # Optional comma-separated list; when set it takes precedence over STRAVA_SYNC_TIME.
 STRAVA_SYNC_TIMES = os.getenv("STRAVA_SYNC_TIMES", "").strip()
 
 PUSHOVER_APP_TOKEN = os.getenv("PUSHOVER_APP_TOKEN", "")
 PUSHOVER_USER_KEY = os.getenv("PUSHOVER_USER_KEY", "")
+
+if len(STRAVA_CLIENT_ID) > 128 or len(STRAVA_CLIENT_SECRET) > 4_096:
+    raise RuntimeError("Strava credential configuration is invalid")
+if set(item.strip() for item in STRAVA_SCOPES.split(",") if item.strip()) - {
+    "read", "read_all", "activity:read", "activity:read_all",
+}:
+    raise RuntimeError("STRAVA_SCOPES contains an unsupported scope")
+if len(PUSHOVER_APP_TOKEN) > 256 or len(PUSHOVER_USER_KEY) > 256:
+    raise RuntimeError("Pushover credential configuration is invalid")
 
 def sqlite_database_path(database_url: str) -> Path | None:
     """Resolve a file-backed SQLite URL without opening the database."""
@@ -96,6 +124,12 @@ def validate_test_database_url(database_url: str) -> None:
 def create_database_engine(database_url: str) -> Engine:
     """Create ChainLoop's SQLite engine through one testable safety seam."""
     validate_test_database_url(database_url)
+    try:
+        url = make_url(database_url)
+    except Exception:
+        raise RuntimeError("DATABASE_URL must be a valid SQLite URL") from None
+    if not url.drivername.startswith("sqlite"):
+        raise RuntimeError("DATABASE_URL must use SQLite")
     return create_engine(
         database_url,
         connect_args={"check_same_thread": False, "timeout": 30},
@@ -283,6 +317,22 @@ def now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def commit_or_conflict(db: Session, detail: str = "The requested value conflicts with existing data") -> None:
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, detail) from None
+
+
+def flush_or_conflict(db: Session, detail: str) -> None:
+    try:
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, detail) from None
+
+
 def seed() -> None:
     """Do not invent equipment on a fresh installation.
 
@@ -421,6 +471,9 @@ def send_pushover(title: str, message: str) -> tuple[bool, str | None]:
                 "message": message,
             },
             timeout=15,
+            follow_redirects=False,
+            verify=True,
+            trust_env=False,
         )
         response.raise_for_status()
         return True, None
@@ -634,8 +687,8 @@ def strava_token(db: Session) -> str | None:
         return None
     # Refresh slightly before expiry so a sync cannot start with an almost-expired token.
     if token.expires_at <= int(now().timestamp()) + 60:
-        response = httpx.post(
-            "https://www.strava.com/oauth/token",
+        data = bounded_json_request(
+            "POST", "https://www.strava.com/oauth/token", MAX_TOKEN_RESPONSE,
             data={
                 "client_id": STRAVA_CLIENT_ID,
                 "client_secret": STRAVA_CLIENT_SECRET,
@@ -644,11 +697,10 @@ def strava_token(db: Session) -> str | None:
             },
             timeout=20,
         )
-        response.raise_for_status()
-        data = response.json()
-        token.access_token = data["access_token"]
-        token.refresh_token = data.get("refresh_token", token.refresh_token)
-        token.expires_at = data["expires_at"]
+        parsed = validate_strava_token_payload(data, require_athlete=False)
+        token.access_token = parsed["access_token"]
+        token.refresh_token = parsed["refresh_token"] or token.refresh_token
+        token.expires_at = parsed["expires_at"]
         db.commit()
     return token.access_token
 
@@ -686,22 +738,25 @@ def validate_oauth_state(request: Request, state: str) -> None:
 # Gear metadata is informational; a transient gear lookup failure must not abort ride import.
 def refresh_strava_gear(db: Session, token: str, gear_id: str) -> None:
     try:
-        response = httpx.get(
-            f"{STRAVA_API_BASE_URL}/gear/{gear_id}",
+        gear_id = validated_gear_id(gear_id)
+    except HTTPException:
+        return
+    try:
+        data = bounded_json_request(
+            "GET", f"{STRAVA_API_BASE_URL}/gear/{gear_id}", MAX_GEAR_RESPONSE,
             headers={"Authorization": f"Bearer {token}"},
             timeout=15,
         )
-        response.raise_for_status()
-        data = response.json()
-    except httpx.HTTPError:
+        parsed = validate_strava_gear_payload(data)
+    except (httpx.HTTPError, ValueError):
         return
     gear = db.get(StravaGear, gear_id)
     if gear is None:
         gear = StravaGear(gear_id=gear_id, updated_at=now())
         db.add(gear)
-    gear.name = data.get("name")
-    gear.distance_km = float(data.get("distance", 0)) / 1000 if data.get("distance") is not None else None
-    gear.primary = data.get("primary")
+    gear.name = parsed["name"]
+    gear.distance_km = parsed["distance_km"]
+    gear.primary = parsed["primary"]
     gear.updated_at = now()
 
 
@@ -746,10 +801,7 @@ def initialization_activities(db: Session, bike: Bike) -> list[Activity]:
 
 
 def parse_utc_date(value: str) -> datetime:
-    try:
-        return datetime.strptime(value, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-    except ValueError as exc:
-        raise HTTPException(400, "Date must use YYYY-MM-DD") from exc
+    return local_date(value, APP_TZ)
 
 
 # --- Background scheduler -------------------------------------------------
@@ -806,45 +858,55 @@ def perform_strava_sync(trigger: str = "manual") -> dict:
             added_km = 0.0
             seen_gear_ids: set[str] = set()
 
+            skipped = 0
+            skipped_categories: dict[str, int] = {}
+
+            # Preserve the established five-page synchronization window.
+            # Malformed records can age out of this window before a retry.
             while page <= 5:
-                response = httpx.get(
-                    f"{STRAVA_API_BASE_URL}/athlete/activities",
+                rows = bounded_json_request(
+                    "GET", f"{STRAVA_API_BASE_URL}/athlete/activities", MAX_ACTIVITY_RESPONSE,
                     headers={"Authorization": f"Bearer {token}"},
                     params={"page": page, "per_page": 100},
                     timeout=30,
                 )
-                response.raise_for_status()
-                rows = response.json()
+                if not isinstance(rows, list) or len(rows) > 100:
+                    raise ValueError("Invalid Strava activity page")
                 if not rows:
                     break
 
                 for item in rows:
-                    if item.get("sport_type") not in {
-                        "Ride", "VirtualRide", "MountainBikeRide", "GravelRide",
-                        "EBikeRide", "EMountainBikeRide", "Velomobile",
-                    }:
+                    try:
+                        parsed = validate_strava_activity(item, now())
+                    except ValueError as exc:
+                        category = str(exc) if str(exc) in {
+                            "record_shape", "timestamp", "timestamp_range", "distance_type", "distance_range"
+                        } else "field_validation"
+                        skipped += 1
+                        skipped_categories[category] = skipped_categories.get(category, 0) + 1
                         continue
-                    external_id = str(item["id"])
+                    if parsed["sport_type"] not in RIDE_TYPES:
+                        continue
+                    external_id = parsed["external_id"]
                     existing = db.scalar(select(Activity).where(Activity.source == "strava", Activity.external_id == external_id))
                     if existing:
                         if existing.raw_gear_id:
                             seen_gear_ids.add(existing.raw_gear_id)
                         continue
 
-                    gear_id = item.get("gear_id")
+                    gear_id = parsed["gear_id"]
                     if gear_id:
                         seen_gear_ids.add(gear_id)
                     bike = db.scalar(select(Bike).where(Bike.strava_gear_id == gear_id)) if gear_id else None
-                    occurred_at = datetime.fromisoformat(item["start_date"].replace("Z", "+00:00"))
                     activity = Activity(
                         source="strava",
                         external_id=external_id,
-                        occurred_at=occurred_at,
-                        distance_km=float(item.get("distance", 0)) / 1000,
+                        occurred_at=parsed["occurred_at"],
+                        distance_km=parsed["distance_km"],
                         bike_id=bike.id if bike else None,
                         credited_chain_id=None,
                         raw_gear_id=gear_id,
-                        raw_name=item.get("name"),
+                        raw_name=parsed["name"],
                     )
                     db.add(activity)
                     db.flush()
@@ -857,6 +919,12 @@ def perform_strava_sync(trigger: str = "manual") -> dict:
                     break
                 page += 1
 
+            if skipped:
+                logging.getLogger("chainloop.strava").warning(
+                    "Skipped %d malformed Strava activities (%s)", skipped,
+                    ", ".join(f"{key}={value}" for key, value in sorted(skipped_categories.items())),
+                )
+
             for gear_id in seen_gear_ids:
                 refresh_strava_gear(db, token, gear_id)
 
@@ -867,7 +935,7 @@ def perform_strava_sync(trigger: str = "manual") -> dict:
             run.processed = processed
             run.added_km = added_km
             db.commit()
-            return {"imported": imported, "processed": processed, "added_km": round(added_km, 2)}
+            return {"imported": imported, "processed": processed, "added_km": round(added_km, 2), "skipped": skipped}
 
     except Exception as exc:
         if run_id is not None:
@@ -1071,7 +1139,24 @@ def wear_graph_series(db: Session) -> list[dict]:
 
 # --- Routes: dashboard and static assets ---------------------------------
 @app.get("/", response_class=HTMLResponse)
-def index(request: Request):
+def index(
+    request: Request,
+    sync_imported: int | None = None,
+    sync_processed: int | None = None,
+    sync_added_km: float | None = None,
+    sync_skipped: int | None = None,
+    sync_error: int | None = None,
+    backfilled_count: int | None = None,
+    backfilled_km: float | None = None,
+):
+    for value in (sync_imported, sync_processed, sync_skipped, backfilled_count):
+        if value is not None and not 0 <= value <= 1_000_000:
+            raise HTTPException(422, "Invalid request input")
+    for value in (sync_added_km, backfilled_km):
+        if value is not None:
+            finite_number(value, "Summary distance", 0, MAX_DISTANCE_KM)
+    if sync_error not in {None, 0, 1}:
+        raise HTTPException(422, "Invalid request input")
     with Session(engine) as db:
         bikes = db.scalars(select(Bike).order_by(Bike.name)).all()
         chains = db.scalars(select(Chain).order_by(Chain.code)).all()
@@ -1115,12 +1200,13 @@ def index(request: Request):
                 "service_by_bike": service_by_bike,
                 "ready_by_bike": ready_by_bike,
                 "wear_prompt_by_chain": wear_prompt_by_chain,
-                "sync_imported": request.query_params.get("sync_imported"),
-                "sync_processed": request.query_params.get("sync_processed"),
-                "sync_added_km": request.query_params.get("sync_added_km"),
-                "sync_error": bool(request.query_params.get("sync_error")),
-                "backfilled_count": request.query_params.get("backfilled_count"),
-                "backfilled_km": request.query_params.get("backfilled_km"),
+                "sync_imported": sync_imported,
+                "sync_processed": sync_processed,
+                "sync_added_km": sync_added_km,
+                "sync_skipped": sync_skipped,
+                "sync_error": sync_error == 1,
+                "backfilled_count": backfilled_count,
+                "backfilled_km": backfilled_km,
                 "strava_configured": bool(STRAVA_CLIENT_ID and STRAVA_CLIENT_SECRET),
                 "strava_connected": strava_connected,
                 "pushover_configured": bool(PUSHOVER_APP_TOKEN and PUSHOVER_USER_KEY),
@@ -1162,39 +1248,44 @@ def strava_auth(request: Request):
 
 @app.get("/auth/strava/callback")
 def strava_callback(request: Request, code: str, state: str = "", scope: str = ""):
+    code = bounded_text(code, "OAuth code", 2_048, required=True)
+    state = bounded_text(state, "OAuth state", 2_048)
+    bounded_text(scope, "OAuth scope", 512)
     validate_oauth_state(request, state)
-    response = httpx.post(
-        "https://www.strava.com/oauth/token",
-        data={
-            "client_id": STRAVA_CLIENT_ID,
-            "client_secret": STRAVA_CLIENT_SECRET,
-            "code": code,
-            "grant_type": "authorization_code",
-        },
-        timeout=20,
-    )
-    response.raise_for_status()
-    data = response.json()
+    try:
+        data = bounded_json_request(
+            "POST", "https://www.strava.com/oauth/token", MAX_TOKEN_RESPONSE,
+            data={
+                "client_id": STRAVA_CLIENT_ID,
+                "client_secret": STRAVA_CLIENT_SECRET,
+                "code": code,
+                "grant_type": "authorization_code",
+            }, timeout=20,
+        )
+        parsed = validate_strava_token_payload(data, require_athlete=True)
+    except (httpx.HTTPError, ValueError):
+        raise HTTPException(502, "Strava authorization failed; retry the connection") from None
     with Session(engine) as db:
-        athlete_id = str(data["athlete"]["id"])
+        athlete_id = parsed["athlete_id"]
         existing = db.scalar(select(StravaToken).where(StravaToken.athlete_id == athlete_id))
         if existing:
-            existing.access_token = data["access_token"]
-            existing.refresh_token = data["refresh_token"]
-            existing.expires_at = data["expires_at"]
+            existing.access_token = parsed["access_token"]
+            existing.refresh_token = parsed["refresh_token"]
+            existing.expires_at = parsed["expires_at"]
         else:
             db.add(StravaToken(
                 athlete_id=athlete_id,
-                access_token=data["access_token"],
-                refresh_token=data["refresh_token"],
-                expires_at=data["expires_at"],
+                access_token=parsed["access_token"],
+                refresh_token=parsed["refresh_token"],
+                expires_at=parsed["expires_at"],
             ))
-        db.commit()
+        commit_or_conflict(db, "Strava connection changed; retry authorization")
     return RedirectResponse("/")
 
 
 @app.post("/sync/strava")
-def sync_strava(ui: bool = Form(False)):
+def sync_strava(ui: str | None = Form(None)):
+    ui = strict_form_bool(ui, "UI flag")
     try:
         result = perform_strava_sync(trigger="manual")
     except Exception:
@@ -1203,7 +1294,7 @@ def sync_strava(ui: bool = Form(False)):
         raise HTTPException(502, "Strava sync failed; check integration configuration and retry") from None
     if ui:
         return RedirectResponse(
-            f"/?sync_imported={result['imported']}&sync_processed={result['processed']}&sync_added_km={result['added_km']:.2f}",
+            f"/?sync_imported={result['imported']}&sync_processed={result['processed']}&sync_added_km={result['added_km']:.2f}&sync_skipped={result['skipped']}",
             status_code=303,
         )
     return result
@@ -1211,14 +1302,17 @@ def sync_strava(ui: bool = Form(False)):
 
 @app.post("/bikes/{bike_id}/map-gear")
 def map_bike_gear(bike_id: int, gear_id: str = Form(...)):
+    bike_id = positive_id(bike_id, "bike ID")
+    gear_id = validated_gear_id(gear_id)
     with Session(engine) as db:
         bike = db.get(Bike, bike_id)
         if not bike:
             raise HTTPException(404, "Bike not found")
         other = db.scalar(select(Bike).where(Bike.strava_gear_id == gear_id, Bike.id != bike_id))
         if other:
-            raise HTTPException(400, f"Gear ID already mapped to bike {other.name}")
-        bike.strava_gear_id = gear_id or None
+            raise HTTPException(409, "Gear ID is already mapped to another bike")
+        bike.strava_gear_id = gear_id
+        flush_or_conflict(db, "Gear ID is already mapped to another bike")
         activities = db.scalars(select(Activity).where(Activity.source == "strava", Activity.raw_gear_id == gear_id, Activity.excluded.is_(False))).all()
         assigned = 0
         processed = 0
@@ -1231,7 +1325,7 @@ def map_bike_gear(bike_id: int, gear_id: str = Form(...)):
         record_event(db, "STRAVA_GEAR_MAPPED", bike_id=bike.id, note=f"Mapped {gear_id} to {bike.name}", metadata={
             "gear_id": gear_id, "assigned_activities": assigned, "processed_activities": processed,
         })
-        db.commit()
+        commit_or_conflict(db, "Gear ID is already mapped to another bike")
     return RedirectResponse("/", status_code=303)
 
 
@@ -1244,6 +1338,11 @@ def initialize_tracking_history(
     wax_date: str = Form(...),
     note: str = Form(""),
 ):
+    bike_id = positive_id(bike_id, "bike ID")
+    chain_id = positive_id(chain_id, "chain ID")
+    start_activity_id = positive_id(start_activity_id, "activity ID")
+    wax_product_id = positive_id(wax_product_id, "wax product ID")
+    note = bounded_text(note, "Note", MAX_NOTE)
     with Session(engine) as db:
         bike = db.get(Bike, bike_id)
         chain = db.get(Chain, chain_id)
@@ -1252,23 +1351,25 @@ def initialize_tracking_history(
         if not bike:
             raise HTTPException(404, "Bike not found")
         if bike.tracking_start_at is not None:
-            raise HTTPException(400, "Tracking has already been started for this bike")
+            raise HTTPException(409, "Tracking has already been started for this bike")
         if not bike.strava_gear_id:
-            raise HTTPException(400, "Map a Strava gear to this bike first")
-        if not chain or chain.bike_id != bike.id or chain.status != "IN_USE":
+            raise HTTPException(409, "Map a Strava gear to this bike first")
+        if not chain or not start_activity:
+            raise HTTPException(404, "Chain or starting activity not found")
+        if chain.bike_id != bike.id or chain.status != "IN_USE":
             raise HTTPException(400, "Select the currently installed chain")
         if not start_activity or start_activity.source != "strava" or start_activity.bike_id != bike.id:
             raise HTTPException(400, "Invalid starting activity")
         if start_activity.raw_gear_id != bike.strava_gear_id or start_activity.excluded:
             raise HTTPException(400, "Starting activity does not match the mapped Strava gear")
         if not wax:
-            raise HTTPException(400, "Wax product not found")
+            raise HTTPException(404, "Wax product not found")
         if chain.total_km != 0 or chain.km_since_wax != 0:
-            raise HTTPException(400, "Historical initialization requires zero chain counters")
+            raise HTTPException(409, "Historical initialization requires zero chain counters")
         if db.scalar(select(Activity.id).where(Activity.bike_id == bike.id, Activity.processed.is_(True)).limit(1)):
-            raise HTTPException(400, "This bike already has processed activities")
+            raise HTTPException(409, "This bike already has processed activities")
         if db.scalar(select(WaxEvent.id).where(WaxEvent.chain_id == chain.id).limit(1)):
-            raise HTTPException(400, "The active chain already has a wax event")
+            raise HTTPException(409, "The active chain already has a wax event")
 
         waxed_at = parse_utc_date(wax_date)
         start_at = ensure_activity_datetime(start_activity.occurred_at)
@@ -1317,12 +1418,13 @@ def initialize_tracking_history(
 
 @app.post("/bikes/{bike_id}/tracking/start")
 def start_tracking_now(bike_id: int):
+    bike_id = positive_id(bike_id, "bike ID")
     with Session(engine) as db:
         bike = db.get(Bike, bike_id)
         if not bike:
             raise HTTPException(404, "Bike not found")
         if bike.tracking_start_at is not None:
-            raise HTTPException(400, "Tracking has already started")
+            raise HTTPException(409, "Tracking has already started")
         bike.tracking_start_at = now()
         record_event(db, "TRACKING_INITIALIZED", bike_id=bike.id, note="Tracking started from this point forward")
         db.commit()
@@ -1336,8 +1438,10 @@ def adjust_chain_distance(
     since_wax_delta_km: float = Form(0),
     note: str = Form(...),
 ):
-    if not note.strip():
-        raise HTTPException(400, "A reason is required for manual distance adjustments")
+    chain_id = positive_id(chain_id, "chain ID")
+    total_delta_km = finite_number(total_delta_km, "Lifetime distance adjustment", -MAX_DISTANCE_KM, MAX_DISTANCE_KM)
+    since_wax_delta_km = finite_number(since_wax_delta_km, "Wax distance adjustment", -MAX_DISTANCE_KM, MAX_DISTANCE_KM)
+    note = bounded_text(note, "A reason", MAX_NOTE, required=True)
     if abs(total_delta_km) < 0.0001 and abs(since_wax_delta_km) < 0.0001:
         raise HTTPException(400, "Enter a non-zero distance adjustment")
     with Session(engine) as db:
@@ -1360,12 +1464,17 @@ def adjust_chain_distance(
 # --- Routes: maintenance --------------------------------------------------
 @app.post("/chains/{chain_id}/wear")
 def add_wear(chain_id: int, wear_percent: float = Form(...), timing: str = Form("before_wax"), note: str = Form("")):
+    chain_id = positive_id(chain_id, "chain ID")
+    wear_percent = finite_number(wear_percent, "Wear percentage", 0.0, 2.0)
+    if timing not in {"before_wax", "after_wax", "other"}:
+        raise HTTPException(422, "Invalid wear timing")
+    note = bounded_text(note, "Note", MAX_NOTE)
     with Session(engine) as db:
         chain = db.get(Chain, chain_id)
         if not chain:
             raise HTTPException(404, "Chain not found")
         if chain.status == "RETIRED":
-            raise HTTPException(400, "Cannot add a normal wear measurement to a retired chain")
+            raise HTTPException(409, "Cannot add a normal wear measurement to a retired chain")
         measurement = WearMeasurement(
             chain_id=chain_id,
             measured_at=now(),
@@ -1394,19 +1503,23 @@ def add_wax(
     chain_id: int,
     wax_product_id: int = Form(...),
     note: str = Form(""),
-    confirm_without_wear: bool = Form(False),
+    confirm_without_wear: str | None = Form(None),
 ):
+    chain_id = positive_id(chain_id, "chain ID")
+    wax_product_id = positive_id(wax_product_id, "wax product ID")
+    note = bounded_text(note, "Note", MAX_NOTE)
+    confirm_without_wear = strict_form_bool(confirm_without_wear, "wear confirmation")
     with Session(engine) as db:
         chain = db.get(Chain, chain_id)
         wax = db.get(WaxProduct, wax_product_id)
         if not chain or not wax:
             raise HTTPException(404, "Chain or wax product not found")
         if chain.status == "RETIRED":
-            raise HTTPException(400, "Cannot wax a retired chain")
+            raise HTTPException(409, "Cannot wax a retired chain")
         if wax.archived:
-            raise HTTPException(400, "Archived wax products cannot be used for new treatments")
+            raise HTTPException(409, "Archived wax products cannot be used for new treatments")
         if needs_wear_before_wax(db, chain) and not confirm_without_wear:
-            raise HTTPException(400, "No wear measurement has been recorded during this wax cycle. Measure first, or explicitly continue without it.")
+            raise HTTPException(409, "No wear measurement has been recorded during this wax cycle. Measure first, or explicitly continue without it.")
 
         missing_wear = needs_wear_before_wax(db, chain)
         previous_wax = latest_wax_event(db, chain.id)
@@ -1429,19 +1542,25 @@ def add_wax(
 
 @app.post("/bikes/{bike_id}/swap")
 def swap_chain(bike_id: int, chain_id: int = Form(...)):
+    bike_id = positive_id(bike_id, "bike ID")
+    chain_id = positive_id(chain_id, "chain ID")
     with Session(engine) as db:
         bike = db.get(Bike, bike_id)
         new_chain = db.get(Chain, chain_id)
-        if not bike or not new_chain or new_chain.bike_id != bike_id or new_chain.status != "READY":
+        if not bike or not new_chain:
+            raise HTTPException(404, "Bike or chain not found")
+        if new_chain.bike_id != bike_id:
             raise HTTPException(400, "Invalid chain for swap")
+        if new_chain.status != "READY":
+            raise HTTPException(409, "Chain is not READY")
         if latest_wax_event(db, new_chain.id) is None:
-            raise HTTPException(400, "That chain is marked READY but has no recorded wax treatment. Record its initial wax first.")
+            raise HTTPException(409, "That chain is marked READY but has no recorded wax treatment. Record its initial wax first.")
         active_chains = db.scalars(select(Chain).where(Chain.bike_id == bike_id, Chain.status == "IN_USE")).all()
         if len(active_chains) > 1:
             raise HTTPException(409, "Database contains more than one active chain; repair this before swapping")
         old_chain = active_chains[0] if active_chains else None
         if old_chain and old_chain.id == new_chain.id:
-            raise HTTPException(400, "That chain is already installed")
+            raise HTTPException(409, "That chain is already installed")
         if old_chain:
             old_chain.status = "NEEDS_WAX"
             record_event(db, "CHAIN_REMOVED", chain_id=old_chain.id, bike_id=bike_id)
@@ -1449,7 +1568,7 @@ def swap_chain(bike_id: int, chain_id: int = Form(...)):
         if new_chain.first_used_at is None:
             new_chain.first_used_at = now()
         record_event(db, "CHAIN_INSTALLED", chain_id=new_chain.id, bike_id=bike_id)
-        db.commit()
+        commit_or_conflict(db, "Active chain changed; reload and retry")
     return RedirectResponse("/", status_code=303)
 
 
@@ -1460,17 +1579,21 @@ def retire_chain(
     reason: str = Form(...),
     note: str = Form(""),
 ):
+    chain_id = positive_id(chain_id, "chain ID")
+    wear_percent = finite_number(wear_percent, "Wear percentage", 0.0, 2.0)
+    reason = bounded_text(reason, "Retirement reason", 32, required=True)
+    note = bounded_text(note, "Note", MAX_NOTE)
     allowed_reasons = {"wear_limit", "damage", "replaced_drivetrain", "other"}
     if reason not in allowed_reasons:
-        raise HTTPException(400, "Invalid retirement reason")
+        raise HTTPException(422, "Invalid retirement reason")
     with Session(engine) as db:
         chain = db.get(Chain, chain_id)
         if not chain:
             raise HTTPException(404, "Chain not found")
         if chain.status == "IN_USE":
-            raise HTTPException(400, "Swap the installed chain before retiring it")
+            raise HTTPException(409, "Swap the installed chain before retiring it")
         if chain.status == "RETIRED":
-            raise HTTPException(400, "Chain is already retired")
+            raise HTTPException(409, "Chain is already retired")
         measured_at = now()
         db.add(WearMeasurement(
             chain_id=chain.id,
@@ -1502,18 +1625,21 @@ def record_initial_wax(
     note: str = Form(""),
 ):
     """Record treatment #1 for legacy/prepared chains that have no wax history yet."""
+    chain_id = positive_id(chain_id, "chain ID")
+    wax_product_id = positive_id(wax_product_id, "wax product ID")
+    note = bounded_text(note, "Note", MAX_NOTE)
+    applied_at = parse_utc_date(wax_date)
     with Session(engine) as db:
         chain = db.get(Chain, chain_id)
         wax = db.get(WaxProduct, wax_product_id)
         if not chain or not wax:
             raise HTTPException(404, "Chain or wax product not found")
         if chain.status == "RETIRED":
-            raise HTTPException(400, "Cannot prepare a retired chain")
+            raise HTTPException(409, "Cannot prepare a retired chain")
         if wax.archived:
-            raise HTTPException(400, "Archived wax products cannot be used for new treatments")
+            raise HTTPException(409, "Archived wax products cannot be used for new treatments")
         if latest_wax_event(db, chain.id):
-            raise HTTPException(400, "This chain already has wax history")
-        applied_at = parse_utc_date(wax_date)
+            raise HTTPException(409, "This chain already has wax history")
         db.add(WaxEvent(
             chain_id=chain.id,
             wax_product_id=wax.id,
@@ -1538,6 +1664,7 @@ def record_initial_wax(
 
 @app.get("/chains/{chain_id}", response_class=HTMLResponse)
 def chain_detail(request: Request, chain_id: int):
+    chain_id = positive_id(chain_id, "chain ID")
     with Session(engine) as db:
         chain = db.get(Chain, chain_id)
         if not chain:
@@ -1582,9 +1709,7 @@ def admin_page(request: Request):
 
 @app.post("/admin/people")
 def admin_add_person(name: str = Form(...)):
-    name = name.strip()
-    if not name:
-        raise HTTPException(400, "Rider name is required")
+    name = bounded_text(name, "Rider name", MAX_NAME, required=True, trim=True)
     with Session(engine) as db:
         db.add(Person(name=name))
         db.commit()
@@ -1593,9 +1718,8 @@ def admin_add_person(name: str = Form(...)):
 
 @app.post("/admin/people/{person_id}")
 def admin_edit_person(person_id: int, name: str = Form(...)):
-    name = name.strip()
-    if not name:
-        raise HTTPException(400, "Rider name is required")
+    person_id = positive_id(person_id, "rider ID")
+    name = bounded_text(name, "Rider name", MAX_NAME, required=True, trim=True)
     with Session(engine) as db:
         person = db.get(Person, person_id)
         if not person:
@@ -1613,16 +1737,18 @@ def admin_add_spec(
     speeds: str = Form(""),
     link_count: str = Form(""),
 ):
-    name = name.strip()
-    if not name:
-        raise HTTPException(400, "Chain specification name is required")
+    name = bounded_text(name, "Chain specification name", MAX_NAME, required=True, trim=True)
+    manufacturer = bounded_text(manufacturer, "Manufacturer", MAX_NAME, trim=True)
+    model = bounded_text(model, "Model", MAX_NAME, trim=True)
+    parsed_speeds = optional_integer(speeds, "Speeds", 1, 24)
+    parsed_links = optional_integer(link_count, "Link count", 1, 500)
     with Session(engine) as db:
         db.add(ChainSpec(
             name=name,
-            manufacturer=manufacturer.strip() or None,
-            model=model.strip() or None,
-            speeds=int(speeds) if speeds.strip() else None,
-            link_count=int(link_count) if link_count.strip() else None,
+            manufacturer=manufacturer or None,
+            model=model or None,
+            speeds=parsed_speeds,
+            link_count=parsed_links,
         ))
         db.commit()
     return RedirectResponse("/admin", status_code=303)
@@ -1637,15 +1763,21 @@ def admin_edit_spec(
     speeds: str = Form(""),
     link_count: str = Form(""),
 ):
+    spec_id = positive_id(spec_id, "chain specification ID")
+    name = bounded_text(name, "Chain specification name", MAX_NAME, required=True, trim=True)
+    manufacturer = bounded_text(manufacturer, "Manufacturer", MAX_NAME, trim=True)
+    model = bounded_text(model, "Model", MAX_NAME, trim=True)
+    parsed_speeds = optional_integer(speeds, "Speeds", 1, 24)
+    parsed_links = optional_integer(link_count, "Link count", 1, 500)
     with Session(engine) as db:
         spec = db.get(ChainSpec, spec_id)
         if not spec:
             raise HTTPException(404, "Chain specification not found")
-        spec.name = name.strip() or spec.name
-        spec.manufacturer = manufacturer.strip() or None
-        spec.model = model.strip() or None
-        spec.speeds = int(speeds) if speeds.strip() else None
-        spec.link_count = int(link_count) if link_count.strip() else None
+        spec.name = name
+        spec.manufacturer = manufacturer or None
+        spec.model = model or None
+        spec.speeds = parsed_speeds
+        spec.link_count = parsed_links
         db.commit()
     return RedirectResponse("/admin", status_code=303)
 
@@ -1659,15 +1791,19 @@ def admin_add_bike(
     change_km: float = Form(600),
     overdue_km: float = Form(800),
 ):
-    if not name.strip():
-        raise HTTPException(400, "Bike name is required")
+    name = bounded_text(name, "Bike name", MAX_NAME, required=True, trim=True)
+    person_id = positive_id(person_id, "rider ID")
+    chain_spec_id = positive_id(chain_spec_id, "chain specification ID")
+    warning_km = finite_number(warning_km, "Warning threshold", 0, MAX_THRESHOLD_KM)
+    change_km = finite_number(change_km, "Change threshold", 0, MAX_THRESHOLD_KM)
+    overdue_km = finite_number(overdue_km, "Overdue threshold", 0, MAX_THRESHOLD_KM)
     if not (0 <= warning_km <= change_km <= overdue_km):
         raise HTTPException(400, "Thresholds must satisfy warning <= change <= overdue")
     with Session(engine) as db:
         if not db.get(Person, person_id) or not db.get(ChainSpec, chain_spec_id):
-            raise HTTPException(400, "Invalid rider or chain specification")
+            raise HTTPException(404, "Rider or chain specification not found")
         db.add(Bike(
-            name=name.strip(), person_id=person_id, chain_spec_id=chain_spec_id,
+            name=name, person_id=person_id, chain_spec_id=chain_spec_id,
             warning_km=warning_km, change_km=change_km, overdue_km=overdue_km,
             tracking_start_at=None, strava_gear_id=None,
         ))
@@ -1685,6 +1821,13 @@ def admin_edit_bike(
     change_km: float = Form(...),
     overdue_km: float = Form(...),
 ):
+    bike_id = positive_id(bike_id, "bike ID")
+    name = bounded_text(name, "Bike name", MAX_NAME, required=True, trim=True)
+    person_id = positive_id(person_id, "rider ID")
+    chain_spec_id = positive_id(chain_spec_id, "chain specification ID")
+    warning_km = finite_number(warning_km, "Warning threshold", 0, MAX_THRESHOLD_KM)
+    change_km = finite_number(change_km, "Change threshold", 0, MAX_THRESHOLD_KM)
+    overdue_km = finite_number(overdue_km, "Overdue threshold", 0, MAX_THRESHOLD_KM)
     if not (0 <= warning_km <= change_km <= overdue_km):
         raise HTTPException(400, "Thresholds must satisfy warning <= change <= overdue")
     with Session(engine) as db:
@@ -1695,7 +1838,7 @@ def admin_edit_bike(
             incompatible = db.scalar(select(Chain.id).where(Chain.bike_id == bike.id, Chain.chain_spec_id != chain_spec_id).limit(1))
             if incompatible:
                 raise HTTPException(400, "Cannot change this bike's chain specification while assigned chains use the existing specification")
-        bike.name = name.strip()
+        bike.name = name
         bike.person_id = person_id
         bike.chain_spec_id = chain_spec_id
         bike.warning_km = warning_km
@@ -1716,22 +1859,27 @@ def admin_add_chain(
     wax_product_id: str = Form(""),
     wax_date: str = Form(""),
 ):
-    code = code.strip().upper()
-    if not code:
-        raise HTTPException(400, "Chain code is required")
+    code = chain_code(code)
+    bike_id = positive_id(bike_id, "bike ID")
     if condition not in {"new", "ready"}:
-        raise HTTPException(400, "Condition must be new or ready")
-    if initial_total_km < 0:
-        raise HTTPException(400, "Initial distance cannot be negative")
+        raise HTTPException(422, "Condition must be new or ready")
+    initial_total_km = finite_number(initial_total_km, "Initial distance", 0, MAX_DISTANCE_KM)
+    measured = optional_finite_number(initial_wear_percent, "Initial wear percentage", 0.0, 2.0)
+    parsed_wax_id = optional_positive_id(wax_product_id, "wax product ID")
     with Session(engine) as db:
         bike = db.get(Bike, bike_id)
-        if not bike or not bike.chain_spec_id:
+        if not bike:
+            raise HTTPException(404, "Bike not found")
+        if not bike.chain_spec_id:
             raise HTTPException(400, "Bike must have a chain specification")
+        supplied_wax = db.get(WaxProduct, parsed_wax_id) if parsed_wax_id else None
+        if parsed_wax_id and supplied_wax is None:
+            raise HTTPException(404, "Wax product not found")
+        if wax_date:
+            parse_utc_date(wax_date)
         if db.scalar(select(Chain.id).where(Chain.code == code)):
-            raise HTTPException(400, "Chain code already exists")
+            raise HTTPException(409, "Chain code already exists")
         first_used = parse_utc_date(first_used_date) if first_used_date else None
-        if initial_wear_percent.strip() and float(initial_wear_percent) < 0:
-            raise HTTPException(400, "Initial wear cannot be negative")
         chain = Chain(
             code=code,
             bike_id=bike.id,
@@ -1740,38 +1888,41 @@ def admin_add_chain(
             first_used_at=first_used,
             total_km=initial_total_km,
             km_since_wax=0,
-            current_wear_percent=float(initial_wear_percent) if initial_wear_percent.strip() else None,
-            last_wear_at=now() if initial_wear_percent.strip() else None,
+            current_wear_percent=measured,
+            last_wear_at=now() if measured is not None else None,
             retired_at=None,
         )
         db.add(chain)
-        db.flush()
+        flush_or_conflict(db, "Chain code already exists")
         record_event(db, "CHAIN_CREATED", chain_id=chain.id, bike_id=bike.id, metadata={"condition": condition, "initial_total_km": initial_total_km})
         if initial_total_km:
             record_event(db, "DISTANCE_ADJUSTMENT", chain_id=chain.id, bike_id=bike.id, distance_km=initial_total_km, note="Initial chain distance", metadata={"total_delta_km": initial_total_km, "since_wax_delta_km": 0})
-        if initial_wear_percent.strip():
-            measured = float(initial_wear_percent)
+        if measured is not None:
             db.add(WearMeasurement(chain_id=chain.id, measured_at=now(), wear_percent=measured, total_km_at_measurement=initial_total_km, timing="initial", note="Initial chain wear"))
             record_event(db, "WEAR_MEASURED", chain_id=chain.id, bike_id=bike.id, metadata={"wear_percent": measured, "timing": "initial", "total_km": initial_total_km})
         if condition == "ready":
-            if not wax_product_id or not wax_date:
+            if parsed_wax_id is None or not wax_date:
                 raise HTTPException(400, "A ready chain requires its initial wax product and date")
-            wax = db.get(WaxProduct, int(wax_product_id))
-            if not wax or wax.archived:
-                raise HTTPException(400, "Select an active wax product")
+            wax = db.get(WaxProduct, parsed_wax_id)
+            if not wax:
+                raise HTTPException(404, "Wax product not found")
+            if wax.archived:
+                raise HTTPException(409, "Select an active wax product")
             applied_at = parse_utc_date(wax_date)
             if first_used and applied_at > first_used:
                 raise HTTPException(400, "Initial wax date cannot be after the first-used date")
             db.add(WaxEvent(chain_id=chain.id, wax_product_id=wax.id, applied_at=applied_at, km_since_previous_wax=0, note="Initial wax treatment"))
             db.flush()
             record_event(db, "CHAIN_INITIAL_WAX", chain_id=chain.id, bike_id=bike.id, created_at=applied_at, metadata={"wax_product_id": wax.id, "wax_product": wax.name, "wax_cycle": 1})
-        db.commit()
+        commit_or_conflict(db, "Chain code already exists")
     return RedirectResponse("/admin", status_code=303)
 
 
 @app.post("/admin/chains/{chain_id}")
 def admin_edit_chain(chain_id: int, code: str = Form(...), bike_id: int = Form(...)):
-    code = code.strip().upper()
+    chain_id = positive_id(chain_id, "chain ID")
+    bike_id = positive_id(bike_id, "bike ID")
+    code = chain_code(code)
     with Session(engine) as db:
         chain = db.get(Chain, chain_id)
         target_bike = db.get(Bike, bike_id)
@@ -1779,52 +1930,53 @@ def admin_edit_chain(chain_id: int, code: str = Form(...), bike_id: int = Form(.
             raise HTTPException(404, "Chain or target bike not found")
         duplicate = db.scalar(select(Chain.id).where(Chain.code == code, Chain.id != chain.id))
         if duplicate:
-            raise HTTPException(400, "Chain code already exists")
+            raise HTTPException(409, "Chain code already exists")
         if chain.bike_id != target_bike.id:
             if chain.status not in {"NEW", "READY"}:
-                raise HTTPException(400, "Only NEW or READY chains can be reassigned")
+                raise HTTPException(409, "Only NEW or READY chains can be reassigned")
             if target_bike.chain_spec_id != chain.chain_spec_id:
                 raise HTTPException(400, "Target bike uses an incompatible chain specification")
             old_bike_id = chain.bike_id
             chain.bike_id = target_bike.id
             record_event(db, "CHAIN_REASSIGNED", chain_id=chain.id, bike_id=target_bike.id, metadata={"from_bike_id": old_bike_id, "to_bike_id": target_bike.id})
         chain.code = code
-        db.commit()
+        commit_or_conflict(db, "Chain code already exists")
     return RedirectResponse("/admin", status_code=303)
 
 
 @app.post("/admin/waxes")
 def admin_add_wax_product(name: str = Form(...), notes: str = Form("")):
-    name = name.strip()
-    if not name:
-        raise HTTPException(400, "Wax product name is required")
+    name = bounded_text(name, "Wax product name", MAX_NAME, required=True, trim=True)
+    notes = bounded_text(notes, "Wax product notes", MAX_NOTE)
     with Session(engine) as db:
         if db.scalar(select(WaxProduct.id).where(WaxProduct.name == name)):
-            raise HTTPException(400, "Wax product already exists")
-        db.add(WaxProduct(name=name, notes=notes.strip() or None, archived=False))
-        db.commit()
+            raise HTTPException(409, "Wax product already exists")
+        db.add(WaxProduct(name=name, notes=notes or None, archived=False))
+        commit_or_conflict(db, "Wax product already exists")
     return RedirectResponse("/admin", status_code=303)
 
 
 @app.post("/admin/waxes/{wax_id}")
 def admin_edit_wax_product(wax_id: int, name: str = Form(...), notes: str = Form("")):
-    if not name.strip():
-        raise HTTPException(400, "Wax product name is required")
+    wax_id = positive_id(wax_id, "wax product ID")
+    name = bounded_text(name, "Wax product name", MAX_NAME, required=True, trim=True)
+    notes = bounded_text(notes, "Wax product notes", MAX_NOTE)
     with Session(engine) as db:
         wax = db.get(WaxProduct, wax_id)
         if not wax:
             raise HTTPException(404, "Wax product not found")
-        duplicate = db.scalar(select(WaxProduct.id).where(WaxProduct.name == name.strip(), WaxProduct.id != wax.id))
+        duplicate = db.scalar(select(WaxProduct.id).where(WaxProduct.name == name, WaxProduct.id != wax.id))
         if duplicate:
-            raise HTTPException(400, "Wax product name already exists")
-        wax.name = name.strip()
-        wax.notes = notes.strip() or None
-        db.commit()
+            raise HTTPException(409, "Wax product name already exists")
+        wax.name = name
+        wax.notes = notes or None
+        commit_or_conflict(db, "Wax product name already exists")
     return RedirectResponse("/admin", status_code=303)
 
 
 @app.post("/admin/waxes/{wax_id}/archive")
 def admin_archive_wax_product(wax_id: int):
+    wax_id = positive_id(wax_id, "wax product ID")
     with Session(engine) as db:
         wax = db.get(WaxProduct, wax_id)
         if not wax:
@@ -1836,6 +1988,7 @@ def admin_archive_wax_product(wax_id: int):
 
 @app.post("/admin/waxes/{wax_id}/reactivate")
 def admin_reactivate_wax_product(wax_id: int):
+    wax_id = positive_id(wax_id, "wax product ID")
     with Session(engine) as db:
         wax = db.get(WaxProduct, wax_id)
         if not wax:
@@ -1847,12 +2000,13 @@ def admin_reactivate_wax_product(wax_id: int):
 
 @app.post("/admin/waxes/{wax_id}/delete")
 def admin_delete_wax_product(wax_id: int):
+    wax_id = positive_id(wax_id, "wax product ID")
     with Session(engine) as db:
         wax = db.get(WaxProduct, wax_id)
         if not wax:
             raise HTTPException(404, "Wax product not found")
         if wax_product_usage_count(db, wax.id):
-            raise HTTPException(400, "Wax products with historical use must be archived, not deleted")
+            raise HTTPException(409, "Wax products with historical use must be archived, not deleted")
         db.delete(wax)
         db.commit()
     return RedirectResponse("/admin", status_code=303)
@@ -1861,6 +2015,7 @@ def admin_delete_wax_product(wax_id: int):
 # --- Routes: corrections and audit ---------------------------------------
 @app.get("/activities/{activity_id}", response_class=HTMLResponse)
 def activity_detail(request: Request, activity_id: int):
+    activity_id = positive_id(activity_id, "activity ID")
     with Session(engine) as db:
         activity = db.get(Activity, activity_id)
         if not activity:
@@ -1882,13 +2037,15 @@ def correct_activity(
     bike_id: str = Form(""),
     chain_id: str = Form(""),
     distance_km: float = Form(...),
-    excluded: bool = Form(False),
+    excluded: str | None = Form(None),
     note: str = Form(...),
 ):
-    if not note.strip():
-        raise HTTPException(400, "A correction reason is required")
-    if distance_km < 0:
-        raise HTTPException(400, "Distance cannot be negative")
+    activity_id = positive_id(activity_id, "activity ID")
+    parsed_bike_id = optional_positive_id(bike_id, "bike ID")
+    parsed_chain_id = optional_positive_id(chain_id, "chain ID")
+    distance_km = finite_number(distance_km, "Distance", 0, MAX_DISTANCE_KM)
+    excluded = strict_form_bool(excluded, "excluded flag")
+    note = bounded_text(note, "A correction reason", MAX_NOTE, required=True)
 
     with Session(engine) as db:
         activity = db.get(Activity, activity_id)
@@ -1903,8 +2060,12 @@ def correct_activity(
         }
         reverse_activity_credit(db, activity)
 
-        target_bike = db.get(Bike, int(bike_id)) if bike_id else None
-        target_chain = db.get(Chain, int(chain_id)) if chain_id else None
+        target_bike = db.get(Bike, parsed_bike_id) if parsed_bike_id else None
+        target_chain = db.get(Chain, parsed_chain_id) if parsed_chain_id else None
+        if parsed_bike_id and target_bike is None:
+            raise HTTPException(404, "Bike not found")
+        if parsed_chain_id and target_chain is None:
+            raise HTTPException(404, "Chain not found")
         if target_chain and (not target_bike or target_chain.bike_id != target_bike.id):
             raise HTTPException(400, "Selected chain does not belong to selected bike")
         if target_chain and target_chain.status == "RETIRED" and (
@@ -1923,7 +2084,7 @@ def correct_activity(
         if not excluded and target_bike and target_chain:
             reapplied = apply_activity_to_chain(db, activity, target_bike, target_chain, notify=False)
 
-        record_event(db, "RIDE_CORRECTED", chain_id=activity.credited_chain_id, bike_id=activity.bike_id, activity_id=activity.id, note=note.strip(), metadata={
+        record_event(db, "RIDE_CORRECTED", chain_id=activity.credited_chain_id, bike_id=activity.bike_id, activity_id=activity.id, note=note, metadata={
             "old": old,
             "new": {
                 "bike_id": activity.bike_id,
@@ -1987,8 +2148,14 @@ def pushover_test():
 
 
 @app.get("/webhooks/strava")
-def strava_webhook_verify(hub_mode: str | None = None, hub_verify_token: str | None = None, hub_challenge: str | None = None):
-    if hub_mode == "subscribe" and STRAVA_VERIFY_TOKEN and hub_verify_token == STRAVA_VERIFY_TOKEN:
+def strava_webhook_verify(request: Request, hub_mode: str | None = None, hub_verify_token: str | None = None, hub_challenge: str | None = None):
+    hub_mode = request.query_params.get("hub.mode", hub_mode)
+    hub_verify_token = request.query_params.get("hub.verify_token", hub_verify_token)
+    hub_challenge = request.query_params.get("hub.challenge", hub_challenge)
+    hub_mode = bounded_text(hub_mode or "", "Webhook mode", 32)
+    hub_verify_token = bounded_text(hub_verify_token or "", "Webhook token", 512)
+    hub_challenge = bounded_text(hub_challenge or "", "Webhook challenge", 512)
+    if hub_mode == "subscribe" and hub_challenge and STRAVA_VERIFY_TOKEN and secrets.compare_digest(hub_verify_token, STRAVA_VERIFY_TOKEN):
         return {"hub.challenge": hub_challenge}
     raise HTTPException(403, "Invalid verification")
 
@@ -2028,7 +2195,8 @@ def api_bikes():
 
 @app.get("/api/activities/recent")
 def api_recent_activities(limit: int = 25):
-    limit = max(1, min(limit, 100))
+    if not 1 <= limit <= 100:
+        raise HTTPException(422, "Invalid request input")
     with Session(engine) as db:
         rows = db.scalars(select(Activity).order_by(Activity.occurred_at.desc()).limit(limit)).all()
         return [{
@@ -2048,6 +2216,7 @@ def api_recent_activities(limit: int = 25):
 
 @app.get("/api/history/{chain_id}")
 def api_chain_history(chain_id: int):
+    chain_id = positive_id(chain_id, "chain ID")
     with Session(engine) as db:
         chain = db.get(Chain, chain_id)
         if not chain:

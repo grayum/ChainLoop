@@ -24,3 +24,16 @@ venv/
 .DS_Store
 .idea/
 .vscode/
+
+# Local secret and SQLite sidecar artifacts
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+*.sqlite*-wal
+*.sqlite*-shm
+*.db-journal

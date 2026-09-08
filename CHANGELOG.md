@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Phase 4B: added strict bounded validation for browser/configuration inputs and
+  untrusted Strava payloads, including finite numeric checks and 0–2% chain wear.
+- Restricted credential-bearing outbound integrations to approved HTTPS endpoints,
+  disabled redirects and added explicit loopback-only development mocks.
+- Hardened the container with UID/GID 10001, a read-only root filesystem, writable
+  `/data`, bounded `/tmp`, dropped capabilities and `no-new-privileges`.
+- Added Docker build-context exclusions and documented sensitive SQLite/WAL/SHM
+  storage plus the deliberate existing-data ownership upgrade.
+- Dependency audit found no known vulnerabilities; existing Starlette/AnyIO test
+  deprecation warnings remain deferred compatibility work.
+
 - Phase 4A: documented external access control as an operator responsibility;
   ChainLoop has no authentication/authorization or proxy identity handling.
 - Added session-bound CSRF checks before browser mutations, signed eight-hour
