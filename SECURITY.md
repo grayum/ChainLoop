@@ -44,6 +44,61 @@ request-size and concurrency limits. The application sync lock is process-local
 and is not a sustained abuse control. Run one application worker for the existing
 scheduler model.
 
+## Runtime validation and outbound integrations
+
+Browser inputs have explicit type, length, range and relationship checks. Chain
+wear is bicycle-chain elongation and is limited to 0.0–2.0 percent for new
+measurements. Numeric inputs must be finite; NaN and infinities are rejected.
+User-entered maintenance dates use `CHAINLOOP_TIMEZONE`, must use `YYYY-MM-DD`,
+and cannot be before 1900 or after the local current date. These rules apply to
+new input only and never rewrite existing historical values. Ordinary notes are
+length-bounded and preserved rather than destructively sanitized; Jinja performs
+contextual output encoding.
+
+The input guards are intentionally generous corruption/error bounds:
+
+| Input | Accepted bound |
+|---|---|
+| Names, manufacturer, model | 100 characters |
+| Chain code | 64 characters; uppercase letters, digits, dot, underscore, hyphen |
+| Notes/reasons | 2,000 characters (retirement reason is an enumerated value) |
+| Initial/corrected distance | 0–1,000,000 km |
+| Manual distance deltas | −1,000,000–1,000,000 km; resulting counters cannot be negative |
+| Notification thresholds | 0–100,000 km, warning ≤ change ≤ overdue |
+| Chain specification | 1–24 speeds; 1–500 links |
+| IDs | Positive SQLite signed 64-bit integers |
+| Strava activity | Positive integer ID, aware timestamp from 2000 through current UTC + 1 day, 0–10,000 km, name ≤255 characters |
+| Strava gear | ID ≤64 safe path characters; distance 0–1,000,000 km |
+| Browser form / webhook body / query | 64 KiB / 16 KiB / 4 KiB |
+
+Expected checkbox values include `on`, `true`, `1`, `off`, `false`, `0` and
+omitted/empty false values. Other strings are rejected. Malformed inputs return
+422, specifically missing resources 404, invalid domain relationships 400, and
+state/uniqueness conflicts 409 where applicable. Database-backed uniqueness races
+roll back and return controlled messages. Rider, bike and specification display
+names remain nonunique as in the existing schema; this phase adds no constraints.
+The webhook remains a side-effect-free stub; verification accepts bounded standard
+`hub.mode`, `hub.verify_token`, `hub.challenge` fields (and existing underscore aliases).
+
+Strava JSON is untrusted. Token, activity and gear payloads are type-checked and
+response bodies are bounded while streaming (64 KiB for token/gear and 2 MiB per
+activity page). Requests ask for uncompressed responses and reject unexpected
+compression before reading/decompression. A malformed individual activity is skipped before lookup,
+insertion or accounting; logs contain only aggregate validation categories, never
+raw payloads, IDs, names or bearer tokens. Other valid activities continue and
+the result reports the skipped count. Skipped records remain unimported, but an
+old malformed activity can eventually fall outside Strava's normal synchronization
+window; ChainLoop cannot guarantee indefinite retries of malformed historical data.
+Malformed page-level responses fail and roll back the synchronization.
+
+Production Strava requests are restricted to `https://www.strava.com/api/v3` and
+the fixed HTTPS OAuth endpoints. Pushover uses its fixed HTTPS API endpoint.
+Credential-bearing requests explicitly disable redirects, retain TLS certificate
+verification and do not fall back to HTTP. Loopback Strava mocks require
+`CHAINLOOP_DEV_ALLOW_OUTBOUND_MOCKS=true` together with explicit development/test
+mode and are limited to localhost, 127.0.0.1 or ::1. RFC1918/LAN and metadata
+service addresses are not accepted.
+
 ## Required production configuration
 
 - `APP_BASE_URL`: canonical external HTTPS origin, for example
@@ -150,9 +205,22 @@ authorization headers, request bodies and secret configuration too. Do not enabl
 HTTP client wire/debug logging on a live installation.
 
 SQLite stores Strava OAuth access/refresh tokens in plaintext. Treat the database,
-journal/WAL/SHM files, configuration and backups as credentials: restrict access
-and protect backup storage. No ad-hoc encryption-at-rest or token-storage migration
-is introduced. Anyone who can read these files may obtain integration credentials.
+journal/WAL/SHM files, configuration and every backup or snapshot as credentials:
+they may contain tokens plus private rider, activity and maintenance history.
+Restrict filesystem access and protect backup storage. No ad-hoc encryption-at-rest
+or token-storage migration is introduced. Anyone who can read these files may
+obtain integration credentials.
+
+## Hardened container runtime
+
+The image runs as `chainloop:chainloop`, fixed UID/GID `10001:10001`. Application
+files are not writable. The Compose example makes the root filesystem read-only,
+mounts `/data` read-write for SQLite database/WAL/SHM persistence, supplies a
+bounded `/tmp` tmpfs, drops all Linux capabilities, enables `no-new-privileges`
+and uses an init process for clean signal handling. It requires no privileged
+execution. A bind-mounted host data directory must be owned by UID/GID 10001;
+follow `UPGRADE.md` exactly for an existing installation and never change ownership
+on an arbitrary parent directory.
 
 ## Explicit Docker Sandbox HTTP development
 
@@ -184,12 +252,11 @@ origin validation intentionally rejects forms submitted from a different port.
 
 ## Phase boundary
 
-Phase 4A does not introduce authentication, RBAC, proxy identity handling, native
-API credentials, uploads, webhook ingestion or Home Assistant features. Full
-input/domain validation, configurable outbound URL/SSRF controls, non-root/container
-filesystem hardening and broader abuse controls remain Phase 4B. Accounting,
-activity attribution, wax-cycle semantics, migration execution and notification
-rules are unchanged. Do not mistake this baseline for safe direct Internet exposure.
+The security baseline does not introduce authentication, RBAC, proxy identity
+handling, native API credentials, uploads, webhook ingestion or Home Assistant
+features. Accounting, activity attribution, wax-cycle semantics, migration
+execution and notification rules are unchanged. Do not mistake this baseline for
+safe direct Internet exposure.
 
 ## Dependency audit snapshot (2026-09-07)
 
@@ -216,4 +283,4 @@ is a point-in-time Python dependency audit, not an operating-system image scan.
 Two test-only deprecation warnings remain: Starlette's legacy HTTPX TestClient
 integration and AnyIO's `BlockingPortal` alias. The IPv6 test exercises the wire
 Host directly because that legacy test transport cannot split an IPv6 netloc.
-These do not justify unrelated runtime/client migrations in Phase 4A.
+These remain deferred compatibility work and do not justify dependency changes in Phase 4B.

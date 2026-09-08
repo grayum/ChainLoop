@@ -247,12 +247,12 @@ def oauth_start(client, monkeypatch):
 
 def fake_oauth(monkeypatch):
     calls = []
-    def post(url, **kwargs):
+    def request(method, url, maximum, **kwargs):
         calls.append(url)
-        return httpx.Response(200, request=httpx.Request("POST", url), json={
+        return {
             "athlete": {"id": 123456}, "access_token": "synthetic-access", "refresh_token": "synthetic-refresh",
-            "expires_at": int(time.time()) + 3600})
-    monkeypatch.setattr(main.httpx, "post", post)
+            "expires_at": int(time.time()) + 3600}
+    monkeypatch.setattr(main, "bounded_json_request", request)
     return calls
 
 
@@ -424,9 +424,9 @@ def test_legacy_errors_are_redacted_without_rewriting_history(client, configured
 def test_oauth_failed_exchange_is_redacted_and_clears_pending_state(client, monkeypatch):
     state = oauth_start(client, monkeypatch)
     def fail(*args, **kwargs): raise httpx.ConnectError('synthetic-secret private-url')
-    monkeypatch.setattr(main.httpx, 'post', fail)
+    monkeypatch.setattr(main, 'bounded_json_request', fail)
     response = client.get('/auth/strava/callback', params={'code':'synthetic-secret','state':state})
-    assert response.status_code == 500
+    assert response.status_code == 502
     assert 'synthetic-secret' not in response.text
     assert 'oauth_nonce' not in cookie_data(client)
     assert_headers(response)
@@ -437,9 +437,7 @@ def test_validation_errors_do_not_echo_input(client):
     assert response.status_code == 422
     assert response.json() == {'detail':'Invalid request input'}
     response = client.post('/admin/specs', data={'csrf_token':csrf(client),'name':'Example','speeds':'synthetic-secret'})
-    # Full optional-number/domain validation is Phase 4B. This phase ensures
-    # existing conversion failures are controlled and do not disclose inputs.
-    assert response.status_code == 500 and 'synthetic-secret' not in response.text
+    assert response.status_code == 422 and response.json() == {'detail':'Invalid request input'}
 
 
 def test_startup_security_failure_precedes_database_creation(database_path):

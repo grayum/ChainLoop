@@ -187,6 +187,13 @@ Configure external access control before starting the production deployment.
 
 Do not commit `.env`, `docker-compose.yaml`, or the contents of `data/`.
 
+The container runs as fixed UID/GID `10001:10001`. On Linux, create the exact
+bind-mounted `data/` directory with ownership that permits this user to create and
+update the SQLite database and its WAL/SHM files. Existing installations must
+follow the backup, stop, narrowly scoped ownership migration and verification
+steps in [`UPGRADE.md`](UPGRADE.md); never recursively change ownership on a broad
+parent directory.
+
 ### 2. Configure Strava
 
 Open **Strava API Settings**:
@@ -373,7 +380,10 @@ initialization is an application-startup operation.
 ## Backups
 
 The authoritative SQLite database is stored under `./data/` by default.
-Back up that directory together with the rest of your ChainLoop deployment using your normal backup system.
+Back up that directory together with the rest of your ChainLoop deployment using
+your normal backup system. The SQLite database, journal/WAL/SHM files and backups
+are sensitive: they may contain Strava OAuth tokens and private rider, activity
+and maintenance history. Protect them as credentials.
 
 ## Roadmap
 

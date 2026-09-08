@@ -159,6 +159,50 @@ Starlette and the FastAPI version needed for compatibility. Container non-root
 and filesystem-hardening changes are deferred to Phase 4B; no ownership changes
 are needed for this phase.
 
+## Phase 4B non-root data ownership (unreleased)
+
+Phase 4B runs ChainLoop as fixed UID/GID `10001:10001`. Before starting this
+version with an existing Linux bind mount, deliberately migrate ownership of only
+the actual ChainLoop data directory:
+
+1. Back up the ChainLoop database and confirm the backup is usable.
+2. Resolve the exact host path mounted at container `/data` from your local
+   `docker-compose.yaml`; do not assume it and do not select its parent directory.
+3. Stop ChainLoop with `docker compose down`.
+4. Inspect the exact directory before changing it, for example
+   `ls -la /opt/docker/chainloop/data`.
+5. Change ownership only on that confirmed ChainLoop data directory and its files:
+
+```bash
+sudo chown -R 10001:10001 /opt/docker/chainloop/data
+```
+
+Replace the example path with the exact path verified in step 2. Never run this
+command against `/`, a home directory, `/opt`, `/opt/docker`, or another broad
+parent. ChainLoop does not run a root entrypoint to repair ownership automatically.
+
+Afterward, rebuild and start, verify `/health`, inspect the logs, and confirm the
+existing totals/history. SQLite must be able to create its journal or WAL/SHM files
+beside the database in `/data`. The Compose example keeps `/data` writable while
+the container root filesystem is read-only and `/tmp` is a bounded tmpfs.
+
+### Phase 4B input and integration compatibility
+
+No schema or migration-ledger change is required. Historical wear and maintenance
+records are retained. New submissions must satisfy the bounds in
+[SECURITY.md](SECURITY.md), including 0–2% wear and dates no later than today in
+`CHAINLOOP_TIMEZONE`. Reload browser forms after upgrading. Scripts should handle
+controlled 400/404/409/422 responses; the recent-activity API limit must be 1–100.
+
+Custom Strava API origins are no longer accepted in production. Explicit
+loopback development mocks require `CHAINLOOP_DEV_ALLOW_OUTBOUND_MOCKS=true` and
+development/test mode. Credential-bearing requests do not follow redirects,
+disable certificate verification or honor ambient HTTP proxy settings. Unexpected
+compressed Strava responses are rejected. Sync results add `skipped`; malformed
+activities remain unimported but are not guaranteed retries beyond the normal
+synchronization window. Copy the runtime hardening options into your local Compose
+configuration; the tracked example does not update local deployments automatically.
+
 ## v0.6.x -> v0.7.0 notes
 
 v0.7.0 adds wax-product archiving and proper wax-cycle numbering. The first recorded wax treatment is **cycle 1**.

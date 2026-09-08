@@ -8,11 +8,21 @@ services:
     image: chainloop:local
     container_name: chainloop
     restart: unless-stopped
+    init: true
+    read_only: true
+    stop_grace_period: 30s
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
 
     environment:
       DATABASE_URL: "${DATABASE_URL:-sqlite:////data/chainloop.db}"
       APP_BASE_URL: "${APP_BASE_URL:?Set APP_BASE_URL in .env}"
       CHAINLOOP_ALLOWED_HOSTS: "${CHAINLOOP_ALLOWED_HOSTS:-127.0.0.1,localhost}"
+      CHAINLOOP_DEV_ALLOW_OUTBOUND_MOCKS: "false"
 
       STRAVA_CLIENT_ID: "${STRAVA_CLIENT_ID:?Set STRAVA_CLIENT_ID in .env}"
       STRAVA_CLIENT_SECRET: "${STRAVA_CLIENT_SECRET:?Set STRAVA_CLIENT_SECRET in .env}"
@@ -47,7 +57,8 @@ services:
       - traefik
 
     volumes:
-      - ./data:/data
+      # This exact directory must be writable by ChainLoop UID/GID 10001.
+      - ./data:/data:rw
 
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3)"]

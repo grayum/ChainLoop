@@ -25,26 +25,25 @@ def test_repeated_strava_sync_imports_and_credits_activity_once(db_engine, confi
         "name": "Example Ride",
     }]
 
-    def fake_get(url, **kwargs):
+    def fake_get(method, url, maximum, **kwargs):
         if url.endswith("/athlete/activities"):
-            return FakeResponse(activity_payload)
+            return activity_payload
         if "/gear/" in url:
-            return FakeResponse({"name": "Example Bike", "distance": 32000, "primary": True})
+            return {"name": "Example Bike", "distance": 32000, "primary": True}
         raise AssertionError(f"Unexpected URL: {url}")
 
     monkeypatch.setattr(main, "engine", db_engine)
     monkeypatch.setattr(main, "strava_token", lambda db: "test-token")
-    monkeypatch.setattr(main.httpx, "get", fake_get)
+    monkeypatch.setattr(main, "bounded_json_request", fake_get)
 
     first = main.perform_strava_sync()
     second = main.perform_strava_sync()
 
-    assert first == {"imported": 1, "processed": 1, "added_km": 32.0}
-    assert second == {"imported": 0, "processed": 0, "added_km": 0.0}
+    assert first == {"imported": 1, "processed": 1, "added_km": 32.0, "skipped": 0}
+    assert second == {"imported": 0, "processed": 0, "added_km": 0.0, "skipped": 0}
     with Session(db_engine) as db:
         assert db.scalar(select(func.count(main.Activity.id))) == 1
         chain = db.get(main.Chain, configured_chain["chain_id"])
         assert chain.total_km == 32
         assert chain.km_since_wax == 32
         assert db.scalar(select(func.count(main.Event.id)).where(main.Event.event_type == "RIDE_ADDED")) == 1
-
