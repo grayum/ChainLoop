@@ -6,5 +6,5 @@ def test_health_reports_application_version_with_disposable_database(db_engine, 
     payload = main.health()
     assert payload["status"] == "ok"
     assert payload["app"] == "ChainLoop"
-    assert payload["version"] == "0.7.0"
+    assert payload["version"] == "0.8.0"
 

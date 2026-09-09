@@ -14,6 +14,85 @@ data/
 
 The repository provides `.env.example` and `docker-compose.yaml.example` as references only.
 
+## v0.7.x -> v0.8.0
+
+**BREAKING / OPERATOR ACTION:** v0.8.0 runs as **UID 10001, GID 10001**.
+An existing `./data` directory/database created by the previous root-running
+container may need a one-time ownership correction. ChainLoop does not repair
+ownership with a root entrypoint.
+
+1. Read this document, [CHANGELOG.md](CHANGELOG.md) and [SECURITY.md](SECURITY.md)
+   before upgrading. ChainLoop has no built-in authentication or authorization;
+   verify your authenticated proxy, VPN or equivalent operator-controlled access
+   policy and prevent direct backend access. Do not expose it to the public Internet.
+2. Create and verify a recoverable backup of the database and local configuration.
+   Use a SQLite-consistent backup while running, or a stopped copy including any
+   journal/WAL/SHM files; do not copy only a live database file. Protect backups as
+   credentials. ChainLoop does not make an automatic migration backup.
+3. Stop ChainLoop with `docker compose down` before ownership changes or file refresh.
+4. Inspect the actual host directory mounted at container `/data` in your local
+   Compose file and inspect its numeric ownership. Confirm `./data` resolves to
+   that exact ChainLoop directory; do not assume your current directory is correct.
+5. If required, change ownership **only on that confirmed data directory and its
+   contents** to `10001:10001`. For a normal checkout using `./data`, after backup:
+
+   ```bash
+   docker compose down
+   ls -lan ./data
+   sudo chown -R 10001:10001 ./data
+   ```
+
+   **Back up first and ensure ChainLoop is stopped. Confirm `./data` really is
+   ChainLoop's data directory before running chown. Never recursively chown `/`,
+   a home directory, `/opt`, `/opt/docker`, the repository root or any arbitrary
+   parent directory.** Substitute the verified exact mount path if different.
+   Do not use `chmod 777` as a workaround. SQLite needs directory write access for
+   its database, journal and WAL/SHM files, not just write access to the database.
+6. Refresh repository-managed files using the Git or tarball procedure below.
+   Review changes in `.env.example` and `docker-compose.yaml.example` against your
+   local files. Apply the required security settings described below, preserving
+   local secrets, volume paths and access policy. **Do not overwrite `.env` or
+   your local `docker-compose.yaml` with examples.**
+7. Validate local Compose configuration and build the v0.8.0 image with
+   `docker compose config --quiet` and `docker compose build`. If using a separately
+   supplied image, pull your verified v0.8.0 image instead.
+8. Start ChainLoop with `docker compose up -d`; check `docker compose ps`.
+9. Check `docker compose logs --tail=50 chainloop` for successful startup and no
+   database, permission or migration failures. Do not retry a refused schema blindly.
+10. Check `/health` using the command below. Expect
+    `{"status":"ok","app":"ChainLoop","version":"0.8.0"}`.
+11. Verify migration/startup: the database must have schema version **2** and the
+    two ledger entries documented below. Restart once and verify startup succeeds
+    without duplicate ledger entries or changed historical totals.
+12. Verify the UI: riders, bikes, physical chain identities, lifetime km and
+    km-since-wax, wax history, wear, activity attribution and corrections. Reload
+    forms after upgrade. Verify Strava connection and configured sync schedule;
+    perform a manual sync with your own integration and check its result, mapping
+    and duplicate protection. Existing OAuth tokens should remain in SQLite.
+
+### Required v0.8.0 runtime settings
+
+The image sets `USER 10001:10001`; remove any local override that runs it as root.
+Retain the following settings in your local Compose service (see the full example):
+
+```yaml
+read_only: true
+init: true
+cap_drop:
+  - ALL
+security_opt:
+  - no-new-privileges:true
+tmpfs:
+  - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
+volumes:
+  - ./data:/data:rw
+```
+
+The root filesystem stays read-only; `/data` stays writable and persistent, while
+`/tmp` is a bounded disposable tmpfs. The tmpfs mode is unrelated to data-directory
+permissions. Drop all capabilities and enable `no-new-privileges`. Updating the
+tracked Compose example does not apply these requirements to your local deployment.
+
 ## Before every upgrade
 
 1. Make or confirm a recent backup of the ChainLoop directory/database before
@@ -41,7 +120,8 @@ git status
 git pull --ff-only
 ```
 
-Review changes to the example configuration files and copy any new variables you actually want into your local files:
+Review the example configuration changes and apply the required v0.8.0 settings
+to your local files without replacing deployment values:
 
 ```bash
 git diff HEAD@{1} -- .env.example docker-compose.yaml.example
@@ -122,9 +202,35 @@ marker state, or an unsupported legacy shape.
 Migration versions are append-only: released version/name pairs keep their
 original meaning, and later schema work receives a new version.
 
+The v0.8.0 schema version is **2**, independently of the application version.
+The expected `schema_migrations` rows (with recorded `applied_at` timestamps) are:
+
+| version | name |
+|---|---|
+| 1 | `v0.5.0-schema-and-data` |
+| 2 | `v0.7.0-schema` |
+
+These are permanent historical identifiers; `v0.7.0-schema` is correct in v0.8.0.
+The legacy `v0.5.0-data-backfill` marker remains in `migration_markers` along with
+any existing supported marker history. To inspect the ledger after startup:
+
+```bash
+docker compose exec -T chainloop python - <<'PYTHON'
+import os
+import sqlite3
+from sqlalchemy.engine import make_url
+path = make_url(os.environ.get("DATABASE_URL", "sqlite:////data/chainloop.db")).database
+with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as db:
+    print(db.execute(
+        "SELECT version, name, applied_at FROM schema_migrations ORDER BY version"
+    ).fetchall())
+    print(db.execute("SELECT key, applied_at FROM migration_markers ORDER BY key").fetchall())
+PYTHON
+```
+
 Never replace `data/chainloop.db` with an empty database during an application upgrade.
 
-## Phase 4A security baseline (unreleased)
+## v0.8.0 browser security and configuration
 
 Before rebuilding, read [SECURITY.md](SECURITY.md). ChainLoop provides no
 access control: verify your authenticated reverse proxy, VPN or equivalent policy
@@ -150,46 +256,18 @@ and prevent direct backend access. The production example retains no published p
 - CSP blocks inline scripts/styles and framing. Use existing JSON APIs rather
   than embedding the UI in an iframe. Static assets still support caching.
 - Startup errors omit raw database diagnostics; back up and consult migration
-  guidance before retrying an incompatible database. Migration execution itself
-  is unchanged. Existing raw integration errors remain in SQLite but are hidden
-  from ordinary responses; protect the database and backups as credentials.
+  guidance before retrying an incompatible database. Existing raw integration errors
+  remain in SQLite but are hidden from ordinary responses; protect the database and backups as credentials.
 
-Dependency updates are limited to the security-affected Jinja2, python-multipart,
-Starlette and the FastAPI version needed for compatibility. Container non-root
-and filesystem-hardening changes are deferred to Phase 4B; no ownership changes
-are needed for this phase.
+Dependency updates include the security-affected Jinja2, python-multipart,
+Starlette and the FastAPI version needed for compatibility. The non-root ownership
+and runtime requirements above are part of the same v0.8.0 upgrade.
 
-## Phase 4B non-root data ownership (unreleased)
+## v0.8.0 input and integration compatibility
 
-Phase 4B runs ChainLoop as fixed UID/GID `10001:10001`. Before starting this
-version with an existing Linux bind mount, deliberately migrate ownership of only
-the actual ChainLoop data directory:
-
-1. Back up the ChainLoop database and confirm the backup is usable.
-2. Resolve the exact host path mounted at container `/data` from your local
-   `docker-compose.yaml`; do not assume it and do not select its parent directory.
-3. Stop ChainLoop with `docker compose down`.
-4. Inspect the exact directory before changing it, for example
-   `ls -la /opt/docker/chainloop/data`.
-5. Change ownership only on that confirmed ChainLoop data directory and its files:
-
-```bash
-sudo chown -R 10001:10001 /opt/docker/chainloop/data
-```
-
-Replace the example path with the exact path verified in step 2. Never run this
-command against `/`, a home directory, `/opt`, `/opt/docker`, or another broad
-parent. ChainLoop does not run a root entrypoint to repair ownership automatically.
-
-Afterward, rebuild and start, verify `/health`, inspect the logs, and confirm the
-existing totals/history. SQLite must be able to create its journal or WAL/SHM files
-beside the database in `/data`. The Compose example keeps `/data` writable while
-the container root filesystem is read-only and `/tmp` is a bounded tmpfs.
-
-### Phase 4B input and integration compatibility
-
-No schema or migration-ledger change is required. Historical wear and maintenance
-records are retained. New submissions must satisfy the bounds in
+Validation does not rewrite historical wear or maintenance records. The startup
+framework adopts supported pre-ledger databases as described above. New submissions
+must satisfy the bounds in
 [SECURITY.md](SECURITY.md), including 0–2% wear and dates no later than today in
 `CHAINLOOP_TIMEZONE`. Reload browser forms after upgrading. Scripts should handle
 controlled 400/404/409/422 responses; the recent-activity API limit must be 1–100.
@@ -219,6 +297,14 @@ When `STRAVA_SYNC_TIMES` is empty or unset, the existing `STRAVA_SYNC_TIME` valu
 
 ## Rollback
 
-If the new container cannot start, stop it and restore the previous application files. Restore the database from backup only if release notes explicitly say a schema migration cannot be used by the previous release.
+**Do not casually start an older application against a database that a newer
+version has migrated.** Older code may lack the newer-schema refusal and can
+perform its own import/startup mutations. The ledger is not permission to downgrade.
 
-Avoid casually rolling an older application version against a database that has already received newer schema migrations.
+Stop the candidate first. Keep a protected copy of its database and all journal/WAL/SHM
+files for recovery. Restore the matching pre-upgrade application, configuration
+and verified pre-upgrade database backup when compatibility has not been explicitly
+established. Restoring a backup loses changes made after that backup; account for
+those changes before rollback. Never delete ledger rows or rename migrations to
+force an older version to start. Review data ownership again before a later upgrade
+if a restored root-running container has created root-owned files.

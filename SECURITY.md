@@ -1,4 +1,4 @@
-# Deployment security and Phase 4A baseline
+# Deployment security — v0.8.0
 
 **ChainLoop does not provide authentication or authorization. Anyone able to reach
 it is fully trusted and can read, administer and change the installation. Do not
@@ -76,7 +76,7 @@ omitted/empty false values. Other strings are rejected. Malformed inputs return
 422, specifically missing resources 404, invalid domain relationships 400, and
 state/uniqueness conflicts 409 where applicable. Database-backed uniqueness races
 roll back and return controlled messages. Rider, bike and specification display
-names remain nonunique as in the existing schema; this phase adds no constraints.
+names remain nonunique as in the existing schema; validation adds no constraints.
 The webhook remains a side-effect-free stub; verification accepts bounded standard
 `hub.mode`, `hub.verify_token`, `hub.challenge` fields (and existing underscore aliases).
 
@@ -283,4 +283,11 @@ is a point-in-time Python dependency audit, not an operating-system image scan.
 Two test-only deprecation warnings remain: Starlette's legacy HTTPX TestClient
 integration and AnyIO's `BlockingPortal` alias. The IPv6 test exercises the wire
 Host directly because that legacy test transport cannot split an IPv6 netloc.
-These remain deferred compatibility work and do not justify dependency changes in Phase 4B.
+These remain deferred compatibility work in v0.8.0.
+
+### v0.8.0 release audit (2026-09-09)
+
+`pip-audit 2.10.1 -r requirements.txt` checked 28 resolved runtime packages and
+reported **zero known vulnerabilities**. No dependency versions were changed
+for release preparation. This is a point-in-time Python package audit; it does
+not cover operating-system packages in the Docker base image.

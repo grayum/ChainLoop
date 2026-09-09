@@ -35,7 +35,7 @@ from app.validation import (
 )
 
 APP_NAME = "ChainLoop"
-APP_VERSION = "0.7.0"
+APP_VERSION = "0.8.0"
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES_DIR = BASE_DIR / "templates"
 STATIC_DIR = BASE_DIR / "static"
