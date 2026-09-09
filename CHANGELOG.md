@@ -1,44 +1,80 @@
 # Changelog
 
-## Unreleased
+## 0.8.0
 
-- Phase 4B: added strict bounded validation for browser/configuration inputs and
-  untrusted Strava payloads, including finite numeric checks and 0–2% chain wear.
-- Restricted credential-bearing outbound integrations to approved HTTPS endpoints,
-  disabled redirects and added explicit loopback-only development mocks.
-- Hardened the container with UID/GID 10001, a read-only root filesystem, writable
-  `/data`, bounded `/tmp`, dropped capabilities and `no-new-privileges`.
-- Added Docker build-context exclusions and documented sensitive SQLite/WAL/SHM
-  storage plus the deliberate existing-data ownership upgrade.
-- Dependency audit found no known vulnerabilities; existing Starlette/AnyIO test
-  deprecation warnings remain deferred compatibility work.
+### BREAKING / OPERATOR ACTION — container UID/GID
 
-- Phase 4A: documented external access control as an operator responsibility;
-  ChainLoop has no authentication/authorization or proxy identity handling.
+The container now runs as **UID 10001, GID 10001**, replacing the previous root
+runtime. Existing root-owned SQLite data may be unwritable until a one-time
+ownership correction is applied. **Back up first, stop ChainLoop, confirm the exact
+ChainLoop data directory, then change ownership only there when required.** Never
+recursively chown an arbitrary parent directory or overwrite local `.env` or
+`docker-compose.yaml`. Follow [UPGRADE.md](UPGRADE.md#v07x---v080) before starting.
+
+Copy the runtime hardening settings into your local deployment: read-only root,
+writable `/data`, bounded `/tmp` tmpfs, non-root UID/GID, all capabilities dropped
+and `no-new-privileges`. Updating the tracked example does not update local files.
+
+### Test safety and data integrity
+
+- Added an automated test safety harness that confines SQLite access to disposable
+  test directories or in-memory databases and guards against installation data.
+- Fixed historical activity/correction eligibility for retired physical chains:
+  rides on or before recorded retirement remain eligible; later rides are rejected.
+  Tests cover lifetime/current-cycle accounting, historical closed wax intervals,
+  reversal, idempotent imports and backfills without maintenance notifications.
+- Made no-ready-spare notifications consistently require a READY chain with a wax
+  event, matching spare counting and installation eligibility.
+- Preserved existing km-since-wax when recording a missing initial treatment for
+  legacy READY chains; no invented wax history or user-visible cycle 0.
+
+### Controlled database migrations
+
+- Added ordered startup migrations and an append-only `schema_migrations` ledger
+  with version/name and schema postcondition validation. Schema version is **2**;
+  historical migration names remain unchanged.
+- Safely adopt supported pre-ledger databases while retaining `migration_markers`
+  and historical maintenance, activity attribution and distance data.
+- Refuse newer, contradictory or unsupported schema states instead of guessing.
+- Removed database side effects from module imports; filename handling and database
+  initialization run during controlled application startup before the scheduler.
+- Serialize concurrent SQLite startup migrations with a write lock and busy timeout.
+
+### Browser security (Phase 4A)
+
 - Added session-bound CSRF checks before browser mutations, signed eight-hour
-  browser sessions, mandatory random session secrets and session-correlated
-  Strava OAuth state with its existing ten-minute expiry.
-- Added strict canonical URL/Host validation, secure production cookies and an
-  explicit loopback-only HTTP development exception for Docker Sandbox.
-- Added restrictive CSP and browser security headers; moved chart JavaScript and
-  inline styling into static assets while preserving contextual output encoding.
-- Reduced health output, redacted integration errors and callback access logs,
-  disabled interactive API docs and prevented validation responses echoing input.
+  sessions, mandatory random session secrets and hardened production cookies.
+- Added strict Host validation and canonical HTTPS `APP_BASE_URL` handling; an
+  explicit Strava redirect URI must match. Loopback HTTP requires development mode.
+- Correlated time-limited Strava OAuth state with the initiating browser session.
+- Added CSP and browser security headers, local chart assets and contextual output
+  encoding; inline executable scripts/styles and framing are blocked.
+- Limited `/health` to status/app/version, redacted integration errors and callback
+  query logging, disabled interactive API docs and stopped validation-error input echoes.
 - Updated Jinja2 to 3.1.6, python-multipart to 0.0.31, Starlette to 1.3.1 and
-  FastAPI to 0.136.0 for concrete security advisories/framework compatibility.
-- Preserved accounting, wax cycles, migration execution and notification rules;
-  broader validation/outbound URL/container hardening remain Phase 4B.
+  FastAPI to 0.136.0 for security advisories and framework compatibility.
 
-- Added an ordered, append-only SQLite schema migration ledger with explicit
-  current-version and postcondition validation.
-- Added safe adoption of supported pre-ledger ChainLoop databases while
-  preserving the historical `migration_markers` table and its data.
-- Moved legacy filename handling and all database migrations out of module
-  import and into controlled application startup before scheduler launch.
-- Added explicit rejection of newer, contradictory and unsupported database
-  states instead of attempting speculative repair.
-- Serialized concurrent SQLite startup migrations with a write lock and busy
-  timeout.
+### Validation and runtime security (Phase 4B)
+
+- Added strict bounded browser/configuration validation, finite numeric checks,
+  0–2% new wear measurements and maintenance date/relationship checks.
+- Validate untrusted Strava token, activity and gear payloads before use; malformed
+  activities are skipped without accounting and malformed pages fail the sync.
+- Hardened outbound URL/SSRF boundaries: approved HTTPS integration endpoints,
+  no redirects or ambient proxies, TLS verification, explicit loopback-only mocks.
+- Bounded browser requests and streamed external responses; reject unexpected
+  compressed Strava responses before decompression.
+- Hardened Docker with non-root UID/GID 10001, read-only root, writable `/data`,
+  bounded `/tmp` tmpfs, dropped capabilities and `no-new-privileges`.
+- Added `.dockerignore` build-context exclusions and sensitive SQLite/WAL/SHM
+  storage guidance. Documented proxy request limits and abuse controls.
+- Dependency audit reports no known vulnerabilities; the existing Starlette/AnyIO
+  test deprecation warnings remain deferred compatibility work.
+
+**ChainLoop still has no built-in authentication or authorization.** Operators must
+protect it with authenticated reverse-proxy, VPN or equivalent network access
+controls and prevent backend bypass. This release is not suitable for direct
+public Internet exposure and adds no Home Assistant features or RBAC.
 
 ## 0.7.0
 

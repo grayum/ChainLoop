@@ -22,22 +22,30 @@ The preferred Docker/Traefik example does not publish the application port.
 Read [SECURITY.md](SECURITY.md) for the trust boundary, required configuration,
 CSRF/session behavior, TLS responsibilities and explicit local HTTP development mode.
 
-## Current release: v0.7.0
+## Current release: v0.8.0
 
-v0.7.0 is the administration and wax-cycle release:
+v0.8.0 is the reliability, migration and security release:
 
-- proper wax treatment/cycle numbering: the first wax is cycle 1, never cycle 0;
-- `NEW` chains can exist before preparation and become `READY` only after their first wax;
-- existing `READY` chains without wax history are flagged for an explicit initial-wax record instead of inventing history;
-- Administration UI for riders, chain specifications, bikes, physical chains and wax products;
-- wax products can be added, edited, archived/reactivated, and unused products can be deleted;
-- compatible NEW/READY chains can be reassigned between bikes;
-- fresh installations start empty and are configured through Administration instead of receiving example equipment;
-- optional multiple daily Strava sync times via `STRAVA_SYNC_TIMES`;
-- dedicated `UPGRADE.md` covering Git and tarball/manual upgrade workflows;
-- additional mobile layout improvements for maintenance/administration screens.
+- automated tests use disposable SQLite databases with guards against installation data;
+- historical activity corrections preserve the correct physical chain and wax cycle,
+  including eligible rides on retired chains;
+- READY spare checks consistently require recorded wax, and recording missing initial
+  wax preserves existing distance;
+- controlled startup migrations maintain an append-only schema ledger, safely adopt
+  supported pre-ledger databases and refuse newer or inconsistent schemas;
+- browser CSRF, signed sessions, secure cookies, Host/canonical URL validation,
+  OAuth correlation, CSP/security headers and health/error redaction;
+- bounded input and Strava payload validation, restricted outbound HTTPS integrations
+  and a hardened non-root container.
 
-Existing databases are preserved and upgraded additively.
+**Operator action required:** the container now runs as UID/GID `10001:10001`.
+Existing root-owned data may need a one-time ownership correction after backup
+and shutdown. Follow [the v0.7.x → v0.8.0 upgrade instructions](UPGRADE.md#v07x---v080).
+Review the runtime hardening settings in your local Compose file as well.
+
+Existing databases are preserved and upgraded additively. External authentication
+and access control remain the operator's responsibility; v0.8.0 must not be
+exposed directly to the public Internet.
 
 ## Core features
 
@@ -156,7 +164,7 @@ Duplicate activities are protected both in application logic and by a SQLite uni
 
 ## Fresh installation
 
-A new v0.7.0 database starts empty. After ChainLoop is running, open **Administration** and create, in order:
+A new v0.8.0 database starts empty. After ChainLoop is running, open **Administration** and create, in order:
 
 1. rider;
 2. chain specification;
@@ -255,7 +263,7 @@ PY
 Expected version:
 
 ```text
-0.7.0
+0.8.0
 ```
 
 ## Example `.env`
@@ -297,36 +305,10 @@ TLS/HSTS and targeted rate limits belong at the reverse proxy.
 
 ## Upgrading an existing installation
 
-See [`UPGRADE.md`](UPGRADE.md) for the full Git-based and tarball/manual upgrade procedures.
-
-
-Keep these local items:
-
-```text
-.env
-docker-compose.yaml
-data/
-```
-
-A typical file refresh is:
-
-```bash
-sudo rsync -av \
-  --exclude='.env' \
-  --exclude='docker-compose.yaml' \
-  --exclude='data/' \
-  /tmp/ChainLoop/ \
-  /opt/docker/chainloop/
-```
-
-Then rebuild and start:
-
-```bash
-docker compose down
-docker compose build --no-cache
-docker compose up -d
-docker compose ps
-```
+Follow [`UPGRADE.md`](UPGRADE.md) for the full v0.7.x → v0.8.0 procedure,
+including backup, shutdown, data ownership, configuration review and verification.
+Preserve your `.env`, local `docker-compose.yaml` and `data/`; do not overwrite
+them with the public examples.
 
 ChainLoop runs ordered, additive database migrations during controlled application
 startup. Existing pre-ledger databases are validated before adoption, and the
@@ -351,7 +333,7 @@ GET /api/history/{chain_id}
 
 ## Development tests
 
-Install the test-only dependencies and run the suite:
+Use Python 3.13, matching the Docker image. Install the test-only dependencies and run the suite:
 
 ```bash
 python -m pip install -r requirements-dev.txt
@@ -388,3 +370,6 @@ and maintenance history. Protect them as credentials.
 ## Roadmap
 
 See [ROADMAP.md](ROADMAP.md).
+
+Developed and maintained by **[Graham van der Wielen](https://grahamofthewheels.com/)**.
+Created with assistance from **ChatGPT & Codex (OpenAI)**.

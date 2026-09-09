@@ -45,12 +45,15 @@
 - Multiple daily Strava sync times (`STRAVA_SYNC_TIMES`) with `STRAVA_SYNC_TIME` backwards compatibility.
 - Dedicated `UPGRADE.md`.
 
-## Security baseline — before further integration work
+## Completed in v0.8.0 — reliability, migrations and security
 
-- Phase 4A (unreleased): external-access-control documentation; CSRF and signed
+- Automated disposable-database test harness and historical accounting/READY fixes.
+- Controlled startup migrations, append-only schema ledger, safe pre-ledger adoption
+  and refusal of newer schemas; database-side-effect-free imports.
+- Phase 4A: external-access-control documentation; CSRF and signed
   browser sessions; OAuth correlation; mandatory secrets; secure cookies; canonical
   URL/Host validation; CSP/headers; health/error redaction; security dependency updates.
-- Phase 4B (unreleased): bounded input/external-payload validation, outbound URL
+- Phase 4B: bounded input/external-payload validation, outbound URL
   constraints, non-root/read-only container hardening and abuse-control guidance.
 - Native authentication/authorization is not provided; access policy remains an
   explicit deployment responsibility.
@@ -70,4 +73,5 @@
 - Intervals.icu activity adapter.
 - Carefully scoped Strava webhook support.
 - CSV export for analysis/portability.
-- Proper versioned database migrations (for example Alembic) as the project matures.
+- Evaluate a migration toolkit such as Alembic if needs outgrow the versioned
+  SQLite migration framework introduced in v0.8.0.
