@@ -362,7 +362,7 @@ initialization is an application-startup operation.
 ## Screenshots
 
 ### Dashboard
-![Dashboard](screenshots/20260911%20-%20ChainLoop%20v0.8.0%20-%20Dashboard.png)
+![Dashboard](screenshots/20260911 - ChainLoop v0.8.0 - Dashboard.png)
 
 ### Statistics
 ![Statistics](screenshots/20260911 - ChainLoop v0.8.0 - Statistics.png)
