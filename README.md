@@ -359,6 +359,20 @@ initialization is an application-startup operation.
 | `app/static/favicon.ico` | Infinity-only browser favicon |
 | `app/static/favicon.png` | Infinity-only PNG favicon |
 
+## Screenshots
+
+### Dashboard
+![Dashboard](screenshots/20260911%20-%20ChainLoop%20v0.8.0%20-%20Dashboard.png)
+
+### Statistics
+![Statistics](screenshots/20260911 - ChainLoop v0.8.0 - Statistics.png)
+
+### Audit log
+![Audit log](screenshots/20260911%20-%20ChainLoop%20v0.8.0%20-%20Audit%20log.png)
+
+### Administration
+![Administration](screenshots/20260911%20-%20ChainLoop%20v0.8.0%20-%20Administration.png)
+
 ## Backups
 
 The authoritative SQLite database is stored under `./data/` by default.
