@@ -8,6 +8,37 @@
 SQLite is the authoritative datastore; Strava supplies rides, Pushover supplies maintenance alerts,
 and Home Assistant can consume the read-only API.
 
+Table of Contents
+=================
+
+* [ChainLoop](#chainloop)
+   * [Deployment security](#deployment-security)
+   * [Current release: v0.8.0](#current-release-v080)
+   * [Core features](#core-features)
+      * [Pushover maintenance notifications](#pushover-maintenance-notifications)
+      * [Automatic Strava sync](#automatic-strava-sync)
+      * [Maintenance workflow](#maintenance-workflow)
+      * [History and statistics](#history-and-statistics)
+      * [Corrections and data integrity](#corrections-and-data-integrity)
+   * [Fresh installation](#fresh-installation)
+      * [1. Create local configuration files](#1-create-local-configuration-files)
+      * [2. Configure Strava](#2-configure-strava)
+      * [3. Configure Pushover](#3-configure-pushover)
+      * [4. Validate and start](#4-validate-and-start)
+   * [Example .env](#example-env)
+   * [Docker / Traefik](#docker--traefik)
+   * [Upgrading an existing installation](#upgrading-an-existing-installation)
+   * [API](#api)
+   * [Development tests](#development-tests)
+   * [Branding](#branding)
+   * [Screenshots](#screenshots)
+      * [Dashboard](#dashboard)
+      * [Statistics](#statistics)
+      * [Audit log](#audit-log)
+      * [Administration](#administration)
+   * [Backups](#backups)
+   * [Roadmap](#roadmap)
+
 ## Deployment security
 
 **ChainLoop does not provide built-in authentication or authorization. It is designed
