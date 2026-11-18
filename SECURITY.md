@@ -28,9 +28,9 @@ to application pages, administration, maintenance, corrections, OAuth initiation
 synchronization, notification testing and JSON APIs. Proxy identity headers are
 neither consumed nor needed; ChainLoop has no authenticated identity or roles.
 
-Home Assistant may read existing GET APIs through operator-managed machine access
-policy. Do not create a blanket API bypass or grant mutation access just to read
-sensors. No Home Assistant features or native API credentials are added here.
+Read-only API clients must use operator-managed access policy. Do not create a
+blanket API bypass or grant mutation access for read-only use. ChainLoop does
+not provide native API credentials.
 
 Keep the Strava OAuth callback behind external policy when the provider supports
 its return flow. Any necessary exception must match only the callback, which still
@@ -267,8 +267,8 @@ origin validation intentionally rejects forms submitted from a different port.
 ## Phase boundary
 
 The security baseline does not introduce authentication, RBAC, proxy identity
-handling, native API credentials, uploads, webhook ingestion or Home Assistant
-features. Accounting, activity attribution, wax-cycle semantics, migration
+handling, native API credentials, uploads or webhook ingestion.
+Accounting, activity attribution, wax-cycle semantics, migration
 execution and notification rules are unchanged. Do not mistake this baseline for
 safe direct Internet exposure.
 
