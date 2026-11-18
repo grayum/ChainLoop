@@ -297,7 +297,7 @@ is a point-in-time Python dependency audit, not an operating-system image scan.
 Two test-only deprecation warnings remain: Starlette's legacy HTTPX TestClient
 integration and AnyIO's `BlockingPortal` alias. The IPv6 test exercises the wire
 Host directly because that legacy test transport cannot split an IPv6 netloc.
-These remain deferred compatibility work in v0.8.0.
+These remain deferred compatibility work in v0.9.0.
 
 ### v0.8.0 release audit (2026-09-09)
 
