@@ -4,28 +4,40 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>{% block title %}{{ app_name }}{% endblock %}</title>
+  <script src="/static/theme.js"></script>
   <link rel="icon" href="/favicon.ico" sizes="any">
   <link rel="icon" href="/favicon.png" type="image/png">
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
+<a class="skip-link" href="#main-content">Skip to content</a>
 <div class="wrap">
-  <div class="hero">
+  <header class="hero">
     <img src="/static/branding/chainloop-logo-dark.png" alt="ChainLoop logo">
-    <p>Bicycle chain usage, wear &amp; maintenance tracking · v{{ app_version }}</p>
+    <div class="hero-meta">
+      <p>Bicycle chain usage, wear &amp; maintenance tracking</p>
+      <a class="version-badge" href="{{ project_url }}" aria-label="ChainLoop v{{ app_version }} on GitHub">v{{ app_version }} <span aria-hidden="true">↗</span></a>
+    </div>
+  </header>
+  <div class="navigation-bar">
+    <nav class="nav" aria-label="Main navigation">
+      {% for path, label in [('/', 'Dashboard'), ('/statistics', 'Statistics'), ('/history', 'Audit log'), ('/admin', 'Administration')] %}
+      <a class="btn" href="{{ path }}"{% if request.url.path == path %} aria-current="page"{% endif %}>{{ label }}</a>
+      {% endfor %}
+    </nav>
+    <fieldset class="theme-selector">
+      <legend class="sr-only">Appearance</legend>
+      {% for value, label in [('system', 'System'), ('light', 'Light'), ('dark', 'Dark')] %}
+      <label><input type="radio" name="theme" value="{{ value }}"{% if value == 'system' %} checked{% endif %}><span>{{ label }}</span></label>
+      {% endfor %}
+    </fieldset>
   </div>
-  <div class="nav">
-    <a class="btn" href="/">Dashboard</a>
-    <a class="btn" href="/statistics">Statistics</a>
-    <a class="btn" href="/history">Audit log</a>
-    <a class="btn" href="/admin">Administration</a>
-  </div>
-  {% block content %}{% endblock %}
-  <div class="footer">
+  <main id="main-content" tabindex="-1">{% block content %}{% endblock %}</main>
+  <footer class="footer">
     <p>ChainLoop stores its authoritative history in SQLite.</p>
     <p>Developed and maintained by <a class="muted" href="https://grahamofthewheels.com/">Graham van der Wielen</a>.<br>
     Created with assistance from ChatGPT &amp; Codex (OpenAI).</p>
-  </div>
+  </footer>
 </div>
 </body>
 </html>
