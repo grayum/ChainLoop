@@ -381,14 +381,10 @@ initialization is an application-startup operation.
 
 | Asset | Purpose |
 |---|---|
-| `app/static/branding/chainloop-logo-dark.png` | Main logo / README |
-| `app/static/branding/chainloop-icon-source.png` | Full-resolution app icon |
-| `app/static/branding/chainloop-icon-128.png` | Pushover/app icon |
-| `app/static/branding/chainloop-icon-512.png` | Large app icon |
-| `app/static/branding/chainloop-strava-124.png` | 124×124 Strava application icon |
-| `app/static/branding/chainloop-favicon-source.png` | Full-resolution infinity favicon source |
+| `app/static/branding/chainloop-logo-dark.png` | Main logo / README (original artwork) |
+| `app/static/branding/chainloop-favicon-source.png` | Full-resolution app icon, large app icon and Strava application icon |
 | `app/static/favicon.ico` | Infinity-only browser favicon |
-| `app/static/favicon.png` | Infinity-only PNG favicon |
+| `app/static/favicon.png` | Infinity-only PNG favicon and Pushover/app icon |
 
 ## Screenshots
 
