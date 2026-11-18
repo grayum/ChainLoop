@@ -147,7 +147,7 @@ def validate_strava_api_base(value: str, allow_loopback_mock: bool) -> str:
         raise RuntimeError("STRAVA_API_BASE_URL is not an allowed Strava API endpoint") from None
     if parsed.username or parsed.password or parsed.query or parsed.fragment:
         raise RuntimeError("STRAVA_API_BASE_URL is not an allowed Strava API endpoint")
-    if raw == "https://www.strava.com/api/v3":
+    if raw in {"https://www.strava.com/api/v3", "https://api-v3.strava.com"}:
         return raw
     loopbacks = {"localhost", "127.0.0.1", "::1"}
     if (allow_loopback_mock and parsed.scheme in {"http", "https"}
@@ -185,6 +185,31 @@ def _strict_int(value: Any, minimum: int = 1, maximum: int = MAX_SQLITE_ID) -> i
     return value
 
 
+def canonical_strava_id(payload: Any, *, id_key: str = "id", id_str_key: str = "id_str") -> str:
+    """Normalize a Strava identity without losing precision or ignoring invalid fields."""
+    if not isinstance(payload, dict):
+        raise ValueError("invalid Strava ID")
+    canonical = None
+    if id_str_key in payload:
+        value = payload[id_str_key]
+        if (not isinstance(value, str) or not re.fullmatch(r"[1-9][0-9]{0,18}", value)
+                or int(value) > MAX_SQLITE_ID):
+            raise ValueError("invalid Strava ID")
+        canonical = value
+    if id_key in payload:
+        value = payload[id_key]
+        if type(value) is not int or not 1 <= value <= MAX_SQLITE_ID:
+            raise ValueError("invalid Strava ID")
+        numeric = str(value)
+        if canonical is not None and canonical != numeric:
+            raise ValueError("invalid Strava ID")
+        if canonical is None:
+            canonical = numeric
+    if canonical is None:
+        raise ValueError("invalid Strava ID")
+    return canonical
+
+
 def _strict_string(value: Any, maximum: int, *, pattern: re.Pattern | None = None) -> str:
     if not isinstance(value, str) or not value or len(value) > maximum or CONTROL_PATTERN.search(value):
         raise ValueError("invalid string")
@@ -202,20 +227,20 @@ def validate_strava_token_payload(data: Any, *, require_athlete: bool) -> dict:
         refresh = _strict_string(refresh, 4096)
     expires = _strict_int(data.get("expires_at"), 1)
     result = {"access_token": access, "refresh_token": refresh, "expires_at": expires}
-    if require_athlete:
-        if refresh is None:
-            raise ValueError("invalid refresh token")
+    if require_athlete and refresh is None:
+        raise ValueError("invalid refresh token")
+    if require_athlete or "athlete" in data:
         athlete = data.get("athlete")
         if not isinstance(athlete, dict):
             raise ValueError("invalid athlete payload")
-        result["athlete_id"] = str(_strict_int(athlete.get("id")))
+        result["athlete_id"] = canonical_strava_id(athlete)
     return result
 
 
 def validate_strava_activity(item: Any, current_time: datetime) -> dict:
     if not isinstance(item, dict):
         raise ValueError("record_shape")
-    external_id = str(_strict_int(item.get("id")))
+    external_id = canonical_strava_id(item)
     sport_type = _strict_string(item.get("sport_type"), 64)
     timestamp = _strict_string(item.get("start_date"), 64)
     try:

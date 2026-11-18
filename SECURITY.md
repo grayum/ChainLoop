@@ -67,7 +67,7 @@ The input guards are intentionally generous corruption/error bounds:
 | Notification thresholds | 0–100,000 km, warning ≤ change ≤ overdue |
 | Chain specification | 1–24 speeds; 1–500 links |
 | IDs | Positive SQLite signed 64-bit integers |
-| Strava activity | Positive integer ID, aware timestamp from 2000 through current UTC + 1 day, 0–10,000 km, name ≤255 characters |
+| Strava activity | Canonical decimal string ID in positive signed-int64 range (`id_str` preferred, numeric `id` fallback), aware timestamp from 2000 through current UTC + 1 day, 0–10,000 km, name ≤255 characters |
 | Strava gear | ID ≤64 safe path characters; distance 0–1,000,000 km |
 | Browser form / webhook body / query | 64 KiB / 16 KiB / 4 KiB |
 
@@ -91,13 +91,27 @@ old malformed activity can eventually fall outside Strava's normal synchronizati
 window; ChainLoop cannot guarantee indefinite retries of malformed historical data.
 Malformed page-level responses fail and roll back the synchronization.
 
-Production Strava requests are restricted to `https://www.strava.com/api/v3` and
-the fixed HTTPS OAuth endpoints. Pushover uses its fixed HTTPS API endpoint.
+Production Strava API bases are restricted to `https://www.strava.com/api/v3`
+(the unchanged default) and `https://api-v3.strava.com`, with fixed HTTPS OAuth
+endpoints. Do not switch to the future API host until Strava officially makes it
+available (expected January 4, 2027). Pushover uses its fixed HTTPS API endpoint.
 Credential-bearing requests explicitly disable redirects, retain TLS certificate
 verification and do not fall back to HTTP. Loopback Strava mocks require
 `CHAINLOOP_DEV_ALLOW_OUTBOUND_MOCKS=true` together with explicit development/test
 mode and are limited to localhost, 127.0.0.1 or ::1. RFC1918/LAN and metadata
 service addresses are not accepted.
+
+Activity and OAuth Athlete objects share one canonical identifier parser. A
+present `id_str` must be an ASCII decimal string without leading zeros, in the
+range 1–9223372036854775807. Numeric `id` fallback accepts only Python integers,
+never bools or floats; both fields must validate and agree when present. Invalid
+present fields cannot be bypassed by fallback. External identifiers remain
+strings in SQLite, JSON APIs and event metadata, preserving browser precision.
+OAuth identity failures occur before stored token changes. Refresh responses may
+omit the Athlete object; when supplied, it must validate and match the stored
+athlete identity before tokens change. Webhook ingestion is not implemented;
+future ingestion must reuse this normalization for `object_id` and `owner_id`
+once Strava documents their corresponding string fields.
 
 ## Required production configuration
 

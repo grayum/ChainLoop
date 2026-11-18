@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+### Strava 2027 API compatibility
+
+- Prepared for Strava's June 1, 2027 Activity/Athlete identifier change: prefer
+  canonical decimal `id_str`, retaining numeric `id` fallback for older responses.
+  When both fields are present they must be valid and agree. Positive IDs through
+  signed INT64_MAX remain exact, including values above JavaScript's safe-integer
+  range; external IDs remain strings in storage, APIs and history metadata.
+- Malformed activity IDs are safely skipped before accounting; malformed OAuth
+  athlete identities fail before stored token state changes. Existing imported
+  identities, deduplication and history are preserved. No database migration is
+  required: external Activity/Athlete identifiers already use string columns.
+- Pre-approved the future official API base `https://api-v3.strava.com` while
+  retaining the default `https://www.strava.com/api/v3`, strict outbound URL
+  validation and existing OAuth endpoints. Operators should not switch until
+  Strava officially makes the new host available (expected January 4, 2027).
+- Webhooks remain acknowledgement-only. Future ingestion must normalize
+  `object_id` and `owner_id` through the shared canonical Strava-ID parser once
+  Strava documents the corresponding string fields; no field names are assumed.
+
 ## 0.8.0
 
 ### BREAKING / OPERATOR ACTION — container UID/GID

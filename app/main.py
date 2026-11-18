@@ -698,6 +698,8 @@ def strava_token(db: Session) -> str | None:
             timeout=20,
         )
         parsed = validate_strava_token_payload(data, require_athlete=False)
+        if "athlete_id" in parsed and parsed["athlete_id"] != token.athlete_id:
+            raise ValueError("invalid athlete identity")
         token.access_token = parsed["access_token"]
         token.refresh_token = parsed["refresh_token"] or token.refresh_token
         token.expires_at = parsed["expires_at"]
