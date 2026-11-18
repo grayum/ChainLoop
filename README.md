@@ -13,7 +13,7 @@ Table of Contents
 
 * [ChainLoop](#chainloop)
    * [Deployment security](#deployment-security)
-   * [Current release: v0.8.0](#current-release-v080)
+   * [Current release: v0.9.0](#current-release-v090)
    * [Core features](#core-features)
       * [Pushover maintenance notifications](#pushover-maintenance-notifications)
       * [Automatic Strava sync](#automatic-strava-sync)
@@ -53,30 +53,31 @@ The preferred Docker/Traefik example does not publish the application port.
 Read [SECURITY.md](SECURITY.md) for the trust boundary, required configuration,
 CSRF/session behavior, TLS responsibilities and explicit local HTTP development mode.
 
-## Current release: v0.8.0
+## Current release: v0.9.0
 
-v0.8.0 is the reliability, migration and security release:
+v0.9.0 prepares Strava compatibility and refreshes ChainLoop's appearance:
 
-- automated tests use disposable SQLite databases with guards against installation data;
-- historical activity corrections preserve the correct physical chain and wax cycle,
-  including eligible rides on retired chains;
-- READY spare checks consistently require recorded wax, and recording missing initial
-  wax preserves existing distance;
-- controlled startup migrations maintain an append-only schema ledger, safely adopt
-  supported pre-ledger databases and refuse newer or inconsistent schemas;
-- browser CSRF, signed sessions, secure cookies, Host/canonical URL validation,
-  OAuth correlation, CSP/security headers and health/error redaction;
-- bounded input and Strava payload validation, restricted outbound HTTPS integrations
-  and a hardened non-root container.
+- Activity/Athlete `id_str` support with numeric `id` fallback, exact positive
+  signed-64-bit identifiers and preserved activity idempotency;
+- pre-approved future `https://api-v3.strava.com` API base, with
+  `https://www.strava.com/api/v3` remaining the default; wait for Strava's official
+  availability before switching (expected January 4, 2027);
+- System / Light / Dark themes with recognizable selector icons, browser-local
+  preference and live OS following in System mode;
+- theme-aware charts, clearer keyboard focus, associated form labels, mobile
+  polish and a header version badge linking to GitHub;
+- canonical branding assets with the existing logo artwork and attribution kept.
 
-**Operator action required:** the container now runs as UID/GID `10001:10001`.
-Existing root-owned data may need a one-time ownership correction after backup
-and shutdown. Follow [the v0.7.x → v0.8.0 upgrade instructions](UPGRADE.md#v07x---v080).
-Review the runtime hardening settings in your local Compose file as well.
+There is **no new database migration**: schema version remains **2**. Existing
+identities, chain totals, wax cycles, wear measurements and audit history are
+preserved. Follow [the v0.8.0 → v0.9.0 upgrade instructions](UPGRADE.md#v080---v090).
+An already-working v0.8.0 installation using UID/GID `10001:10001` needs no
+additional ownership change. Earlier installations must first follow the
+[historical v0.7.x → v0.8.0 instructions](UPGRADE.md#v07x---v080).
 
-Existing databases are preserved and upgraded additively. External authentication
-and access control remain the operator's responsibility; v0.8.0 must not be
-exposed directly to the public Internet.
+The existing security guarantees remain in place. External authentication and
+access control remain the operator's responsibility; do not expose ChainLoop
+directly to the public Internet.
 
 ## Core features
 
@@ -202,7 +203,7 @@ Duplicate activities are protected both in application logic and by a SQLite uni
 
 ## Fresh installation
 
-A new v0.8.0 database starts empty. After ChainLoop is running, open **Administration** and create, in order:
+A new v0.9.0 database starts empty. After ChainLoop is running, open **Administration** and create, in order:
 
 1. rider;
 2. chain specification;
@@ -301,7 +302,7 @@ PY
 Expected version:
 
 ```text
-0.8.0
+0.9.0
 ```
 
 ## Example `.env`
@@ -343,8 +344,9 @@ TLS/HSTS and targeted rate limits belong at the reverse proxy.
 
 ## Upgrading an existing installation
 
-Follow [`UPGRADE.md`](UPGRADE.md) for the full v0.7.x → v0.8.0 procedure,
-including backup, shutdown, data ownership, configuration review and verification.
+Follow [`UPGRADE.md`](UPGRADE.md#v080---v090) for the v0.8.0 → v0.9.0 procedure,
+including backup, container rebuild/recreation and verification. Earlier releases
+must also follow the historical upgrade steps and ownership guidance.
 Preserve your `.env`, local `docker-compose.yaml` and `data/`; do not overwrite
 them with the public examples.
 
@@ -399,6 +401,9 @@ initialization is an application-startup operation.
 | `app/static/favicon.png` | Infinity-only PNG favicon and Pushover/app icon |
 
 ## Screenshots
+
+These screenshots show v0.8.0 workflows. v0.9.0 retains these workflows and adds
+the appearance control, refreshed colors and GitHub version badge described above.
 
 ### Dashboard
 ![Dashboard](screenshots/20260911%20-%20ChainLoop%20v0.8.0%20-%20Dashboard.png)

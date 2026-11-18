@@ -35,7 +35,7 @@ from app.validation import (
 )
 
 APP_NAME = "ChainLoop"
-APP_VERSION = "0.8.0"
+APP_VERSION = "0.9.0"
 PROJECT_URL = "https://github.com/grayum/ChainLoop"
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES_DIR = BASE_DIR / "templates"
