@@ -36,6 +36,7 @@ from app.validation import (
 
 APP_NAME = "ChainLoop"
 APP_VERSION = "0.8.0"
+PROJECT_URL = "https://github.com/grayum/ChainLoop"
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES_DIR = BASE_DIR / "templates"
 STATIC_DIR = BASE_DIR / "static"
@@ -152,6 +153,7 @@ def migrate_legacy_database(database_url: str) -> None:
 validate_test_database_url(DATABASE_URL)
 engine = create_database_engine(DATABASE_URL)
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR), context_processors=[template_security_context])
+templates.env.globals["project_url"] = PROJECT_URL
 signer = URLSafeTimedSerializer(SESSION_SECRET, salt="chainloop-oauth-state")
 sync_lock = threading.Lock()
 scheduler_stop = threading.Event()

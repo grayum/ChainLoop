@@ -157,6 +157,13 @@ A newly prepared chain's first recorded hot-wax treatment starts **wax cycle 1**
 
 ### History and statistics
 
+Choose **System**, **Light** or **Dark** in the compact appearance control beside
+the navigation. System is the default and follows operating-system changes while
+ChainLoop is open. Your choice stays in this browser under `chainloop-theme` in
+localStorage; it is not stored in SQLite. Pages, forms and charts share the same
+theme. If browser storage is disabled, the control still works for the open page.
+The version badge in the header links to the ChainLoop GitHub repository.
+
 Each physical chain has a history/maintenance page with:
 
 - first-use date;
@@ -371,6 +378,11 @@ python -m pip install -r requirements-dev.txt
 python -m pytest
 ```
 
+Theme behavior also has browser-independent JavaScript tests using Node.js 18+
+(no npm dependencies). When Node is installed, pytest runs these automatically;
+you can also run `node --test tests/theme.test.cjs` directly. Python-only
+environments explicitly skip that test. Browser tools are not runtime dependencies.
+
 The test harness permits only in-memory SQLite databases or database files
 inside its disposable pytest directory. Importing the application during a
 test fails before opening a database if `DATABASE_URL` resolves elsewhere.
@@ -381,14 +393,10 @@ initialization is an application-startup operation.
 
 | Asset | Purpose |
 |---|---|
-| `app/static/branding/chainloop-logo-dark.png` | Main logo / README |
-| `app/static/branding/chainloop-icon-source.png` | Full-resolution app icon |
-| `app/static/branding/chainloop-icon-128.png` | Pushover/app icon |
-| `app/static/branding/chainloop-icon-512.png` | Large app icon |
-| `app/static/branding/chainloop-strava-124.png` | 124×124 Strava application icon |
-| `app/static/branding/chainloop-favicon-source.png` | Full-resolution infinity favicon source |
+| `app/static/branding/chainloop-logo-dark.png` | Main logo / README (original artwork) |
+| `app/static/branding/chainloop-favicon-source.png` | Full-resolution app icon, large app icon and Strava application icon |
 | `app/static/favicon.ico` | Infinity-only browser favicon |
-| `app/static/favicon.png` | Infinity-only PNG favicon |
+| `app/static/favicon.png` | Infinity-only PNG favicon and Pushover/app icon |
 
 ## Screenshots
 

@@ -1,26 +1,78 @@
-
-(function(){
-  const wear = JSON.parse(document.getElementById("chartData").textContent).wear;
-  if (wear.length) {
-    const svg = document.getElementById('wearChart'), legend=document.getElementById('wearLegend');
-    const W=900,H=360,L=65,R=25,T=25,B=50;
-    const pts=wear.flatMap(s=>s.points);
-    const maxX=Math.max(1,...pts.map(p=>p[0])), maxY=Math.max(.5,...pts.map(p=>p[1]));
-    const colors=['#2f941d','#2767c5','#b06a00','#8b3f9e','#c43d32','#14828c'];
-    const el=(name,attrs={})=>{const n=document.createElementNS('http://www.w3.org/2000/svg',name);Object.entries(attrs).forEach(([k,v])=>n.setAttribute(k,v));return n};
-    const sx=x=>L+x/maxX*(W-L-R), sy=y=>H-B-y/maxY*(H-T-B);
-    svg.append(el('line',{x1:L,y1:H-B,x2:W-R,y2:H-B,stroke:'#8892a0'})); svg.append(el('line',{x1:L,y1:T,x2:L,y2:H-B,stroke:'#8892a0'}));
-    for(let i=0;i<=5;i++){const x=maxX*i/5, px=sx(x); const t=el('text',{x:px,y:H-20,'text-anchor':'middle','font-size':'12',fill:'#667085'});t.textContent=Math.round(x)+' km';svg.append(t)}
-    for(let i=0;i<=5;i++){const y=maxY*i/5, py=sy(y); const t=el('text',{x:L-10,y:py+4,'text-anchor':'end','font-size':'12',fill:'#667085'});t.textContent=y.toFixed(2)+'%';svg.append(t)}
-    wear.forEach((s,idx)=>{const color=colors[idx%colors.length]; const points=s.points.map(p=>sx(p[0])+','+sy(p[1])).join(' ');svg.append(el('polyline',{points,fill:'none',stroke:color,'stroke-width':'3'}));s.points.forEach(p=>svg.append(el('circle',{cx:sx(p[0]),cy:sy(p[1]),r:4,fill:color})));const span=document.createElement('span');span.textContent=s.chain;span.className="chart-color-"+(idx%colors.length);legend.append(span)});
+(function () {
+  "use strict";
+  const data = JSON.parse(document.getElementById("chartData").textContent);
+  const W = 900, H = 360, L = 65, R = 25, T = 25;
+  function el(name, attrs = {}) {
+    const node = document.createElementNS("http://www.w3.org/2000/svg", name);
+    Object.entries(attrs).forEach(([key, value]) => node.setAttribute(key, value));
+    return node;
   }
-
-  const wax = JSON.parse(document.getElementById("chartData").textContent).wax;
-  if (wax.length) {
-    const svg=document.getElementById('waxChart'),W=900,H=360,L=65,R=25,T=25,B=60; const max=Math.max(1,...wax.map(x=>x.km)); const bw=Math.max(8,(W-L-R)/wax.length*.65); const gap=(W-L-R)/wax.length;
-    const el=(name,attrs={})=>{const n=document.createElementNS('http://www.w3.org/2000/svg',name);Object.entries(attrs).forEach(([k,v])=>n.setAttribute(k,v));return n};
-    svg.append(el('line',{x1:L,y1:H-B,x2:W-R,y2:H-B,stroke:'#8892a0'})); svg.append(el('line',{x1:L,y1:T,x2:L,y2:H-B,stroke:'#8892a0'}));
-    wax.forEach((r,i)=>{const h=r.km/max*(H-T-B), x=L+i*gap+(gap-bw)/2, y=H-B-h;svg.append(el('rect',{x,y,width:bw,height:h,rx:3,fill:'#49c724'}));const t=el('text',{x:x+bw/2,y:H-B+17,'text-anchor':'middle','font-size':'10',fill:'#667085'});t.textContent=r.chain_code;svg.append(t)});
-    for(let i=0;i<=5;i++){const v=max*i/5,py=H-B-v/max*(H-T-B);const t=el('text',{x:L-10,y:py+4,'text-anchor':'end','font-size':'12',fill:'#667085'});t.textContent=Math.round(v)+' km';svg.append(t)}
+  function label(svg, value, attrs) {
+    const node = el("text", {class: "chart-label", "font-size": 12, ...attrs});
+    node.textContent = value;
+    svg.append(node);
+  }
+  function axes(svg, bottom) {
+    svg.append(el("line", {class: "chart-axis", x1: L, y1: H - bottom, x2: W - R, y2: H - bottom}));
+    svg.append(el("line", {class: "chart-axis", x1: L, y1: T, x2: L, y2: H - bottom}));
+  }
+  function grid(svg, y) {
+    svg.append(el("line", {class: "chart-grid", x1: L, y1: y, x2: W - R, y2: y}));
+  }
+  if (data.wear.length) {
+    const svg = document.getElementById("wearChart");
+    const legend = document.getElementById("wearLegend");
+    const bottom = 50;
+    const points = data.wear.flatMap(series => series.points);
+    const maxX = Math.max(1, ...points.map(point => point[0]));
+    const maxY = Math.max(.5, ...points.map(point => point[1]));
+    const sx = x => L + x / maxX * (W - L - R);
+    const sy = y => H - bottom - y / maxY * (H - T - bottom);
+    for (let i = 0; i <= 5; i++) {
+      const x = maxX * i / 5, y = maxY * i / 5;
+      grid(svg, sy(y));
+      label(svg, Math.round(x) + " km", {x: sx(x), y: H - 20, "text-anchor": "middle"});
+      label(svg, y.toFixed(2) + "%", {x: L - 10, y: sy(y) + 4, "text-anchor": "end"});
+    }
+    axes(svg, bottom);
+    data.wear.forEach((series, index) => {
+      const className = "chart-color-" + (index % 6);
+      // CSS variables recolor the existing SVG immediately on a theme change.
+      svg.append(el("polyline", {
+        class: className, points: series.points.map(point => sx(point[0]) + "," + sy(point[1])).join(" "),
+        fill: "none", stroke: "currentColor", "stroke-width": 3,
+        "stroke-dasharray": ["none", "8 3", "3 3", "10 3 2 3", "6 5", "2 4"][index % 6],
+      }));
+      series.points.forEach(point => svg.append(el("circle", {class: className, cx: sx(point[0]), cy: sy(point[1]), r: 4, fill: "currentColor"})));
+      const span = document.createElement("span");
+      span.textContent = series.chain;
+      span.className = className;
+      legend.append(span);
+    });
+  }
+  if (data.wax.length) {
+    const svg = document.getElementById("waxChart");
+    const bottom = 60;
+    const max = Math.max(1, ...data.wax.map(record => record.km));
+    const gap = (W - L - R) / data.wax.length;
+    const width = Math.max(1, gap * .65);
+    for (let i = 0; i <= 5; i++) {
+      const value = max * i / 5, y = H - bottom - value / max * (H - T - bottom);
+      grid(svg, y);
+      label(svg, Math.round(value) + " km", {x: L - 10, y: y + 4, "text-anchor": "end"});
+    }
+    axes(svg, bottom);
+    data.wax.forEach((record, index) => {
+      const height = record.km / max * (H - T - bottom);
+      const x = L + index * gap + (gap - width) / 2;
+      const bar = el("rect", {class: "chart-wax", x, y: H - bottom - height, width, height, rx: 3});
+      const title = el("title");
+      title.textContent = record.chain_code + ": " + record.km.toFixed(1) + " km";
+      bar.append(title);
+      svg.append(bar);
+      if (index % Math.ceil(data.wax.length / 10) === 0) {
+        label(svg, record.chain_code, {x: x + width / 2, y: H - bottom + 17, "text-anchor": "middle", "font-size": 10});
+      }
+    });
   }
 })();

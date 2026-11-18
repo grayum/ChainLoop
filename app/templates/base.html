@@ -4,28 +4,46 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>{% block title %}{{ app_name }}{% endblock %}</title>
+  <script src="/static/theme.js"></script>
   <link rel="icon" href="/favicon.ico" sizes="any">
   <link rel="icon" href="/favicon.png" type="image/png">
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
+<a class="skip-link" href="#main-content">Skip to content</a>
 <div class="wrap">
-  <div class="hero">
+  <header class="hero">
     <img src="/static/branding/chainloop-logo-dark.png" alt="ChainLoop logo">
-    <p>Bicycle chain usage, wear &amp; maintenance tracking · v{{ app_version }}</p>
+    <div class="hero-meta">
+      <p>Bicycle chain usage, wear &amp; maintenance tracking</p>
+      <a class="version-badge" href="{{ project_url }}" aria-label="ChainLoop v{{ app_version }} on GitHub">v{{ app_version }} <span aria-hidden="true">↗</span></a>
+    </div>
+  </header>
+  <div class="navigation-bar">
+    <nav class="nav" aria-label="Main navigation">
+      {% for path, label in [('/', 'Dashboard'), ('/statistics', 'Statistics'), ('/history', 'Audit log'), ('/admin', 'Administration')] %}
+      <a class="btn" href="{{ path }}"{% if request.url.path == path %} aria-current="page"{% endif %}>{{ label }}</a>
+      {% endfor %}
+    </nav>
+    <fieldset class="theme-selector">
+      <legend class="sr-only">Appearance</legend>
+      {% for value, label in [('system', 'System'), ('light', 'Light'), ('dark', 'Dark')] %}
+      <label><input type="radio" name="theme" value="{{ value }}"{% if value == 'system' %} checked{% endif %}><span>
+        <svg class="theme-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          {% if value == 'system' %}<rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4"/>
+          {% elif value == 'light' %}<circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M4.9 4.9l1.4 1.4m11.4 11.4l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>
+          {% else %}<path d="M20.5 13.2A8.5 8.5 0 0 1 10.8 3.5 8.5 8.5 0 1 0 20.5 13.2Z"/>{% endif %}
+        </svg>{{ label }}
+      </span></label>
+      {% endfor %}
+    </fieldset>
   </div>
-  <div class="nav">
-    <a class="btn" href="/">Dashboard</a>
-    <a class="btn" href="/statistics">Statistics</a>
-    <a class="btn" href="/history">Audit log</a>
-    <a class="btn" href="/admin">Administration</a>
-  </div>
-  {% block content %}{% endblock %}
-  <div class="footer">
+  <main id="main-content" tabindex="-1">{% block content %}{% endblock %}</main>
+  <footer class="footer">
     <p>ChainLoop stores its authoritative history in SQLite.</p>
     <p>Developed and maintained by <a class="muted" href="https://grahamofthewheels.com/">Graham van der Wielen</a>.<br>
     Created with assistance from ChatGPT &amp; Codex (OpenAI).</p>
-  </div>
+  </footer>
 </div>
 </body>
 </html>

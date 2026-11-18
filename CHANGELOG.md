@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Appearance and branding
+
+- Added an accessible System / Light / Dark segmented appearance control.
+  System is the default and follows OS changes live; explicit choices override
+  the OS and persist only in browser localStorage. A local script applies the
+  theme before paint without weakening CSP or adding an external dependency.
+- Shared semantic colors now cover pages, forms, tables, badges, focus indicators
+  and charts. SVG chart axes, labels, grid lines and series recolor immediately;
+  wear series also use distinct line patterns. Improved spacing, mobile layouts,
+  current-page navigation, keyboard focus, associated form labels and
+  skip-to-content access.
+- Linked the header version badge to the ChainLoop GitHub repository. Preserved
+  the existing logo artwork and maintainer attribution/link.
+- Removed redundant generated icon assets. The full-resolution favicon source
+  is the canonical large/app/Strava icon, while favicon.png also serves as the
+  documented Pushover/app icon. Browser favicon files remain available.
+
 ### Strava 2027 API compatibility
 
 - Prepared for Strava's June 1, 2027 Activity/Athlete identifier change: prefer

@@ -58,11 +58,10 @@
       {% if ready_by_bike.get(b.id) == 0 and active and active.km_since_wax >= b.change_km %}<div class="note error">⚠️ No waxed spare chain is ready.</div>{% endif %}
 
       <form method="post" action="/bikes/{{ b.id }}/map-gear"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <label>Map Strava gear ID</label>
-        <select name="gear_id" required>
+        <label>Map Strava gear ID<select name="gear_id" required>
           {% if b.strava_gear_id %}<option value="{{ b.strava_gear_id }}">Current: {{ b.strava_gear_id }}</option>{% endif %}
           {% for g in unmapped_gears %}<option value="{{ g.gear_id }}">{{ g.name or 'Unnamed gear' }} · {{ g.gear_id }} · {{ g.ride_count }} rides · {{ g.total_km }} km</option>{% endfor %}
-        </select>
+        </select></label>
         <button>Save gear mapping</button>
       </form>
 
@@ -73,10 +72,9 @@
         <div class="note"><strong>Historical setup available</strong><br>{{ init_summary.ride_count }} imported rides / {{ init_summary.total_km }} km are available. Historical backfill does not send Pushover alerts.</div>
         <form method="post" action="/bikes/{{ b.id }}/tracking/initialize-history"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
           <input type="hidden" name="chain_id" value="{{ active.id }}">
-          <label>First ride on {{ active.code }}</label>
-          <select name="start_activity_id" required>{% for a in init_activities %}<option value="{{ a.id }}">{{ a.occurred_at|localdt }} · {{ '%.1f'|format(a.distance_km) }} km · {{ a.raw_name or 'Unnamed ride' }}</option>{% endfor %}</select>
-          <div class="row"><div><label>Initial wax product</label><select name="wax_product_id" required>{% for w in wax_products %}<option value="{{ w.id }}">{{ w.name }}</option>{% endfor %}</select></div><div><label>Wax date</label><input name="wax_date" type="date" required></div></div>
-          <label>Optional setup note</label><input name="note" maxlength="2000" placeholder="Initial ChainLoop history import">
+          <label>First ride on {{ active.code }}<select name="start_activity_id" required>{% for a in init_activities %}<option value="{{ a.id }}">{{ a.occurred_at|localdt }} · {{ '%.1f'|format(a.distance_km) }} km · {{ a.raw_name or 'Unnamed ride' }}</option>{% endfor %}</select></label>
+          <div class="row"><div><label>Initial wax product<select name="wax_product_id" required>{% for w in wax_products %}<option value="{{ w.id }}">{{ w.name }}</option>{% endfor %}</select></label></div><div><label>Wax date<input name="wax_date" type="date" required></label></div></div>
+          <label>Optional setup note<input name="note" maxlength="2000" placeholder="Initial ChainLoop history import"></label>
           <button class="primary">Initialize from history &amp; backfill</button>
         </form>
         {% endif %}
@@ -85,16 +83,15 @@
 
       {% if active %}
       <form method="post" action="/chains/{{ active.id }}/wear"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <label>Wear measurement (%)</label><input name="wear_percent" type="number" step="0.01" min="0" max="2" required>
+        <label>Wear measurement (%)<input name="wear_percent" type="number" step="0.01" min="0" max="2" required></label>
         <input type="hidden" name="timing" value="before_wax">
-        <label>Optional note</label><input name="note" maxlength="2000" placeholder="Default timing: before waxing">
+        <label>Optional note<input name="note" maxlength="2000" placeholder="Default timing: before waxing"></label>
         <button>Record wear</button>
       </form>
       {% endif %}
 
       <form method="post" action="/bikes/{{ b.id }}/swap"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <label>Swap to ready chain</label>
-        <select name="chain_id" required>{% for c in chains if c.bike_id==b.id and c.status=='READY' and wax_details_by_chain.get(c.id) %}<option value="{{ c.id }}">{{ c.code }}</option>{% endfor %}</select>
+        <label>Swap to ready chain<select name="chain_id" required>{% for c in chains if c.bike_id==b.id and c.status=='READY' and wax_details_by_chain.get(c.id) %}<option value="{{ c.id }}">{{ c.code }}</option>{% endfor %}</select></label>
         <button {% if ready_by_bike.get(b.id)==0 %}disabled{% endif %}>Swap chain</button>
       </form>
     </div>
