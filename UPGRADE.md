@@ -14,6 +14,52 @@ data/
 
 The repository provides `.env.example` and `docker-compose.yaml.example` as references only.
 
+## v0.8.0 -> v0.9.0
+
+1. Back up the database and local configuration first. Use a SQLite-consistent
+   backup, or stop ChainLoop and copy the database together with its journal/WAL/SHM
+   files. Verify the backup is recoverable and protect it as credentials.
+2. Retain your `.env`, customized `docker-compose.yaml` and `data/` directory.
+   Refresh repository-managed files only, using the Git or tarball procedure below.
+   Keep the existing access policy, session secret, integration credentials and
+   volume paths; do not replace local deployment files with public examples.
+3. Stop the old container, validate the configuration, rebuild and recreate:
+
+   ```bash
+   docker compose down
+   docker compose config --quiet
+   docker compose build
+   docker compose up -d --force-recreate
+   docker compose ps
+   ```
+
+   Never remove the persistent data volume/directory. Retain the v0.8.0 non-root,
+   read-only runtime settings. An already-working v0.8.0 installation using
+   UID/GID `10001:10001` needs **no additional ownership change**.
+4. Review startup logs and check `/health` using the verification command below.
+   Expect `{"status":"ok","app":"ChainLoop","version":"0.9.0"}`.
+   There is **no new database migration**: schema version remains **2**, with
+   the same ledger entries, migration names and timestamps. Restart once and
+   verify startup remains successful and history/totals remain unchanged.
+5. Verify riders, bikes, physical chains, credited activities, lifetime km,
+   km-since-wax, wax cycles, wear measurements and audit history. Confirm the
+   existing Strava connection and sync schedule; perform a manual Strava sync
+   and verify previously imported rides are not counted again. Valid `id_str`
+   and older numeric `id` responses identify the same existing activities.
+6. Reload browser pages/forms. Check System, Light and Dark appearance choices,
+   live OS following in System mode, theme-aware charts, mobile forms and the
+   v0.9.0 GitHub version link. Preferences are stored only in browser localStorage.
+   Retain your normal reverse-proxy/access policy and verify security headers.
+
+Keep `STRAVA_API_BASE_URL=https://www.strava.com/api/v3`. The future official
+`https://api-v3.strava.com` value is accepted, but operators should not switch
+until Strava officially makes it available (expected January 4, 2027). OAuth
+endpoints are unchanged. Strava's June 1, 2027 Activity/Athlete identifier change
+is supported without rewriting stored identifiers or changing the schema.
+
+Earlier installations must follow the historical v0.7.x → v0.8.0 steps below
+before relying on this section's existing-ownership assumptions.
+
 ## v0.7.x -> v0.8.0
 
 **BREAKING / OPERATOR ACTION:** v0.8.0 runs as **UID 10001, GID 10001**.
@@ -202,7 +248,7 @@ marker state, or an unsupported legacy shape.
 Migration versions are append-only: released version/name pairs keep their
 original meaning, and later schema work receives a new version.
 
-The v0.8.0 schema version is **2**, independently of the application version.
+The v0.8.0 and v0.9.0 schema version is **2**, independently of the application version.
 The expected `schema_migrations` rows (with recorded `applied_at` timestamps) are:
 
 | version | name |
@@ -210,7 +256,8 @@ The expected `schema_migrations` rows (with recorded `applied_at` timestamps) ar
 | 1 | `v0.5.0-schema-and-data` |
 | 2 | `v0.7.0-schema` |
 
-These are permanent historical identifiers; `v0.7.0-schema` is correct in v0.8.0.
+These are permanent historical identifiers; `v0.7.0-schema` remains correct in
+v0.8.0 and v0.9.0.
 The legacy `v0.5.0-data-backfill` marker remains in `migration_markers` along with
 any existing supported marker history. To inspect the ledger after startup:
 

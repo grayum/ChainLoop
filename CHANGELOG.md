@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.9.0
 
 ### Appearance and branding
 
@@ -8,6 +8,7 @@
   System is the default and follows OS changes live; explicit choices override
   the OS and persist only in browser localStorage. A local script applies the
   theme before paint without weakening CSP or adding an external dependency.
+  Decorative local SVG display, sun and moon icons accompany the text labels.
 - Shared semantic colors now cover pages, forms, tables, badges, focus indicators
   and charts. SVG chart axes, labels, grid lines and series recolor immediately;
   wear series also use distinct line patterns. Improved spacing, mobile layouts,
@@ -28,8 +29,9 @@
   range; external IDs remain strings in storage, APIs and history metadata.
 - Malformed activity IDs are safely skipped before accounting; malformed OAuth
   athlete identities fail before stored token state changes. Existing imported
-  identities, deduplication and history are preserved. No database migration is
-  required: external Activity/Athlete identifiers already use string columns.
+  identities, activity idempotency, deduplication and history are preserved.
+  No database migration is required: external Activity/Athlete identifiers
+  already use string columns.
 - Pre-approved the future official API base `https://api-v3.strava.com` while
   retaining the default `https://www.strava.com/api/v3`, strict outbound URL
   validation and existing OAuth endpoints. Operators should not switch until

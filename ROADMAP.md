@@ -58,15 +58,15 @@
 - Native authentication/authorization is not provided; access policy remains an
   explicit deployment responsibility.
 
-## In progress for v0.9.0 — Strava compatibility and UI polish
+## Completed in v0.9.0 — Strava compatibility and UI polish
 
 - Strava Activity/Athlete `id_str` support, exact signed-64-bit identity handling
   and pre-approved future official API host (existing default retained).
-- System / Light / Dark themes with browser-local preference and live OS following.
+- System / Light / Dark themes with display/sun/moon selector icons, browser-local
+  preference and live OS following.
 - Theme-aware charts, accessible appearance controls, mobile/readability polish
   and a header version link to GitHub.
 - Canonical branding assets and preserved logo artwork/maintainer attribution.
-- Release verification and populated manual UI review before v0.9.0 publication.
 
 ## Priority 6 — Future expansion / lower priority
 

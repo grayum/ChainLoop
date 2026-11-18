@@ -1,4 +1,4 @@
-# Deployment security — v0.8.0
+# Deployment security — v0.9.0
 
 **ChainLoop does not provide authentication or authorization. Anyone able to reach
 it is fully trusted and can read, administer and change the installation. Do not
@@ -297,7 +297,7 @@ is a point-in-time Python dependency audit, not an operating-system image scan.
 Two test-only deprecation warnings remain: Starlette's legacy HTTPX TestClient
 integration and AnyIO's `BlockingPortal` alias. The IPv6 test exercises the wire
 Host directly because that legacy test transport cannot split an IPv6 netloc.
-These remain deferred compatibility work in v0.8.0.
+These remain deferred compatibility work in v0.9.0.
 
 ### v0.8.0 release audit (2026-09-09)
 
@@ -305,3 +305,11 @@ These remain deferred compatibility work in v0.8.0.
 reported **zero known vulnerabilities**. No dependency versions were changed
 for release preparation. This is a point-in-time Python package audit; it does
 not cover operating-system packages in the Docker base image.
+
+### v0.9.0 release audit (2026-11-18)
+
+`pip-audit 2.10.1 -r requirements.txt` reports **zero known vulnerabilities**.
+No runtime dependency versions or security policies changed during release
+preparation. The existing Starlette HTTPX TestClient and AnyIO `BlockingPortal`
+deprecation warnings remain in tests. This Python package audit does not cover
+operating-system packages in the Docker base image.
