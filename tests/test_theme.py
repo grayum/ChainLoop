@@ -41,6 +41,10 @@ def test_shared_shell_has_native_theme_controls_and_safe_bootstrap(client, path)
     assert all(item['type'] == 'radio' for item in radios)
     assert ['checked' in item for item in radios] == [True, False, False]
     assert '<legend class="sr-only">Appearance</legend>' in response.text
+    icons = [attrs for tag, attrs in tags if tag == 'svg' and attrs.get('class') == 'theme-icon']
+    assert len(icons) == 3
+    assert all(icon.get('aria-hidden') == 'true' and icon.get('focusable') == 'false' for icon in icons)
+    assert all(icon.get('stroke') == 'currentColor' and icon.get('fill') == 'none' for icon in icons)
     scripts = [attrs for tag, attrs in tags if tag == 'script' and attrs.get('src') == '/static/theme.js']
     assert scripts == [{'src': '/static/theme.js'}]  # Blocking head script applies before CSS/paint.
     assert response.text.index('/static/theme.js') < response.text.index('/static/app.css')
