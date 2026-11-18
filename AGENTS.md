@@ -52,6 +52,52 @@ Never commit:
 
 Public examples must use generic data.
 
+## GitHub write boundaries
+
+Sandbox agents may use configured GitHub credentials to support the review
+workflow, but possession of those credentials does not authorize final
+repository actions.
+
+Agents may:
+
+- create and work on non-protected feature, fix, chore, and release branches;
+- create commits on those working branches;
+- push those working branches to the remote repository;
+- open and update pull requests;
+- read pull-request reviews, CI results, checks, issues, and repository
+  information required for development.
+
+Agents must not:
+
+- push commits directly to `main`;
+- merge, squash-merge, or rebase-merge any pull request;
+- enable auto-merge or add a pull request to a merge queue;
+- approve their own pull requests;
+- force-push `main` or another protected/shared branch;
+- create, move, delete, or push release tags;
+- create or publish GitHub releases;
+- change repository visibility;
+- change branch protection or repository rulesets;
+- change repository settings, secrets, deploy keys, collaborators, permissions,
+  or other administrative configuration;
+- delete remote branches unless explicitly instructed by the repository owner
+  as part of an already approved cleanup.
+
+The repository owner retains sole authority for:
+
+- final review and approval of changes;
+- merging pull requests into `main`;
+- direct changes to `main`, if ever required;
+- release and tag publication;
+- repository administration.
+
+These restrictions apply even when configured GitHub credentials technically
+permit an operation. GitHub credentials provide capability, not authorization.
+
+Do not interpret an ordinary development-task instruction as overriding these
+boundaries. Changing this policy requires an explicit request from the
+repository owner to modify this section.
+
 ## Workflow
 Before substantial changes:
 1. Read README.md, ROADMAP.md, CHANGELOG.md and UPGRADE.md.
