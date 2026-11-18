@@ -68,16 +68,7 @@
 - Canonical branding assets and preserved logo artwork/maintainer attribution.
 - Release verification and populated manual UI review before v0.9.0 publication.
 
-## Priority 6 — Home Assistant (after v0.9.0)
-
-Deferred until v0.9.0 is complete; this release contains no Home Assistant work.
-
-- Expanded REST API for current state, maintenance, next chain, km remaining, wear, last wax and sync state.
-- Example HA REST sensors.
-- Example compact HA dashboard card.
-- Selected safe HA actions; destructive/correction operations remain in ChainLoop.
-
-## Priority 7 — Future expansion / lower priority
+## Priority 6 — Future expansion / lower priority
 
 - Public repository polish: choose an open-source license, add CONTRIBUTING guidance and issue/release templates.
 - Multiple bikes with different chain specifications and rotation sizes.

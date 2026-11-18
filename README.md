@@ -5,8 +5,8 @@
 # ChainLoop
 
 **ChainLoop** is a self-hosted bicycle-chain usage, wear and maintenance tracker.
-SQLite is the authoritative datastore; Strava supplies rides, Pushover supplies maintenance alerts,
-and Home Assistant can consume the read-only API.
+SQLite is the authoritative datastore; Strava supplies rides and Pushover supplies
+maintenance alerts.
 
 Table of Contents
 =================
@@ -358,7 +358,7 @@ without wax history are intentionally flagged for an explicit initial-wax record
 ## API
 
 Existing read-only API endpoints remain available through your deployment's external
-access policy. Home Assistant must use that policy too; it receives no automatic bypass.
+access policy. API consumers must use that policy too; they receive no automatic bypass.
 `/health` returns only `status`, `app` and `version` (503 if its database check fails).
 Interactive API documentation is disabled. Useful endpoints include:
 

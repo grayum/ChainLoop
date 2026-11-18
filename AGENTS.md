@@ -9,7 +9,6 @@ for immersive hot waxing.
 - Docker deployment
 - Strava activity ingestion
 - Pushover notifications
-- Home Assistant is an integration/display layer
 
 ## Data integrity
 - Preserve existing SQLite installations.
