@@ -53,20 +53,54 @@ Public examples must use generic data.
 
 ## GitHub write boundaries
 
-Sandbox agents may use configured GitHub credentials to support the review
-workflow, but possession of those credentials does not authorize final
-repository actions.
+Credentials are capability, not authorization. Possession of a GitHub token,
+configured credentials or an authenticated `gh` session never grants permission
+to perform a remote write without the explicit owner approval required below.
 
-Agents may:
+### Local operations — no approval required
 
-- create and work on non-protected feature, fix, chore, and release branches;
-- create commits on those working branches;
-- push those working branches to the remote repository;
-- open and update pull requests;
-- read pull-request reviews, CI results, checks, issues, and repository
-  information required for development.
+Agents may without approval:
 
-Agents must not:
+- create and switch non-protected local branches;
+- edit files and create local commits;
+- amend local work before it has been pushed, when appropriate;
+- inspect the repository, branches, PRs, reviews, CI results, issues and other
+  read-only GitHub state;
+- prepare and review diffs;
+- run tests and validation.
+
+### Remote writes — explicit approval required
+
+Any operation that changes remote Git/GitHub state requires explicit approval
+from the repository owner immediately before execution. This includes:
+
+- pushing a new branch;
+- pushing additional commits to an existing remote branch;
+- force-pushing a non-protected/private work branch where otherwise allowed;
+- opening a pull request;
+- updating PR metadata, body or title;
+- closing or reopening PRs or issues;
+- deleting remote branches;
+- any other GitHub mutation, subject to the high-risk restrictions below.
+
+Required workflow for remote writes:
+
+1. Complete and validate the local work first.
+2. Report the current branch, commit(s), working-tree status, tests/validation
+   performed and exact remote actions proposed.
+3. **STOP** and ask the repository owner for explicit approval.
+4. After approval, perform only the specifically approved remote actions.
+5. Report the resulting remote branch, PR URL or other changed GitHub state.
+
+Approval is action-specific and one-time. Approval for one push or PR creation
+does not grant standing permission for later pushes or other GitHub mutations.
+If the proposed commits, target or remote actions change, seek new approval.
+Ordinary development-task instructions are not approval for remote writes.
+
+### Prohibited / separate high-risk actions
+
+Agents must not perform the following as part of the ordinary development
+workflow:
 
 - push commits directly to `main`;
 - merge, squash-merge, or rebase-merge any pull request;
@@ -78,9 +112,18 @@ Agents must not:
 - change repository visibility;
 - change branch protection or repository rulesets;
 - change repository settings, secrets, deploy keys, collaborators, permissions,
-  or other administrative configuration;
-- delete remote branches unless explicitly instructed by the repository owner
-  as part of an already approved cleanup.
+  or other administrative configuration.
+
+These actions require a separate explicit repository-owner instruction where
+applicable. Ordinary approval to "push and open the PR" does not authorize them.
+
+### Remote branch cleanup
+
+Never delete a remote branch automatically. Deletion requires explicit approval
+for that specific branch immediately before execution; general cleanup approval
+does not authorize deleting other branches.
+
+### Owner authority and expected workflow
 
 The repository owner retains sole authority for:
 
@@ -90,8 +133,23 @@ The repository owner retains sole authority for:
 - release and tag publication;
 - repository administration.
 
-These restrictions apply even when configured GitHub credentials technically
-permit an operation. GitHub credentials provide capability, not authorization.
+The normal expected workflow is:
+
+```text
+plan
+-> implement locally
+-> test
+-> review diff
+-> commit locally
+-> report ready remote actions
+-> STOP for owner approval
+-> push/open PR after approval
+-> owner reviews/merges
+```
+
+Pushes and PR creation must not happen automatically when local work is ready.
+These restrictions apply even when configured credentials technically permit
+an operation. Credentials provide capability, not authorization.
 
 Do not interpret an ordinary development-task instruction as overriding these
 boundaries. Changing this policy requires an explicit request from the
