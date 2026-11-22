@@ -184,14 +184,54 @@ docker compose ps
 
 ## Tarball/manual installations
 
-Extract the new release into a temporary directory and copy only repository-managed files:
+Extract the new release into a temporary directory with readable application-code
+permissions. A restrictive operator umask such as `077` can turn archive directory
+modes from `755` into `700` and ordinary file modes from `644` into `600` during
+extraction. These permissions can be carried into the image and prevent the
+non-root runtime user (UID/GID `10001:10001`) from importing the application, for
+example:
+
+```text
+PermissionError: [Errno 13] Permission denied: '/app/app/__init__.py'
+```
+
+Replace `vX.Y.Z` with the release version and confirm the archive's top-level
+directory matches the paths below. Remove only the disposable extraction
+directory, then set `umask 022` inside a temporary subshell:
+
+```bash
+rm -rf /tmp/ChainLoop-vX.Y.Z
+
+(
+    umask 022
+    tar -xzf /tmp/ChainLoop-vX.Y.Z.tar.gz -C /tmp/
+)
+```
+
+The subshell leaves the operator's normal/global umask unchanged. Verify
+representative permissions **before rsync or building**:
+
+```bash
+stat -c '%A %a %U:%G %n' \
+  /tmp/ChainLoop-vX.Y.Z/app \
+  /tmp/ChainLoop-vX.Y.Z/app/__init__.py \
+  /tmp/ChainLoop-vX.Y.Z/app/main.py
+```
+
+Expect application directories to be `755` (`drwxr-xr-x`) and ordinary application
+files to be `644` (`-rw-r--r--`). This concerns extracted application code only:
+do not chmod/chown the production data directory as a remedy. `/data` must remain
+owned by and writable for UID/GID `10001:10001`. Application code remains
+non-writable at runtime, and the read-only root filesystem hardening is unchanged.
+
+Once permissions are correct, copy only repository-managed files:
 
 ```bash
 rsync -av \
   --exclude='.env' \
   --exclude='docker-compose.yaml' \
   --exclude='data/' \
-  /tmp/ChainLoop/ \
+  /tmp/ChainLoop-vX.Y.Z/ \
   /opt/docker/chainloop/
 ```
 
@@ -201,9 +241,18 @@ Then:
 cd /opt/docker/chainloop
 docker compose config --quiet
 docker compose build --no-cache
+docker compose run --rm \
+  --no-deps \
+  --entrypoint python \
+  chainloop \
+  -c 'import app; import app.main; print("ChainLoop", app.main.APP_VERSION, "import OK")'
 docker compose up -d
 docker compose ps
 ```
+
+The pre-start Compose import check is useful for catching unreadable application
+files before starting the server. It uses the service's configured runtime user
+and hardening settings; it does not replace the startup and health checks below.
 
 ## Post-upgrade checks
 
