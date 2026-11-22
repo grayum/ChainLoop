@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.1
+
+- Fixed chain swaps to lower-ID READY chains incorrectly failing with HTTP 409.
+  Flush the outgoing chain's removal before installing its replacement, avoiding
+  ORM update ordering conflicts with the one-IN_USE-chain-per-bike unique index.
+  Removal, installation and both audit events remain one atomic transaction.
+  No schema migration or change to the unique index is required.
+
 ## 0.9.0
 
 ### Appearance and branding

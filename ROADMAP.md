@@ -70,6 +70,8 @@
 
 ## Priority 6 — Future expansion / lower priority
 
+- Browser-form conflict handling: show expected maintenance HTTP 409 messages
+  within the UI instead of navigating to raw JSON responses.
 - Public repository polish: choose an open-source license, add CONTRIBUTING guidance and issue/release templates.
 - Multiple bikes with different chain specifications and rotation sizes.
 - Multiple people and, where needed, separate Strava accounts.

@@ -13,7 +13,7 @@ Table of Contents
 
 * [ChainLoop](#chainloop)
    * [Deployment security](#deployment-security)
-   * [Current release: v0.9.0](#current-release-v090)
+   * [Current release: v0.9.1](#current-release-v091)
    * [Core features](#core-features)
       * [Pushover maintenance notifications](#pushover-maintenance-notifications)
       * [Automatic Strava sync](#automatic-strava-sync)
@@ -53,9 +53,13 @@ The preferred Docker/Traefik example does not publish the application port.
 Read [SECURITY.md](SECURITY.md) for the trust boundary, required configuration,
 CSRF/session behavior, TLS responsibilities and explicit local HTTP development mode.
 
-## Current release: v0.9.0
+## Current release: v0.9.1
 
-v0.9.0 prepares Strava compatibility and refreshes ChainLoop's appearance:
+v0.9.1 fixes chain swaps that incorrectly returned HTTP 409 when installing a
+lower-ID READY chain. The swap and audit events remain atomic; the unique
+active-chain constraint and schema version are unchanged.
+
+It retains the Strava compatibility and appearance improvements from v0.9.0:
 
 - Activity/Athlete `id_str` support with numeric `id` fallback, exact positive
   signed-64-bit identifiers and preserved activity idempotency;
@@ -203,7 +207,7 @@ Duplicate activities are protected both in application logic and by a SQLite uni
 
 ## Fresh installation
 
-A new v0.9.0 database starts empty. After ChainLoop is running, open **Administration** and create, in order:
+A new v0.9.1 database starts empty. After ChainLoop is running, open **Administration** and create, in order:
 
 1. rider;
 2. chain specification;
@@ -302,7 +306,7 @@ PY
 Expected version:
 
 ```text
-0.9.0
+0.9.1
 ```
 
 ## Example `.env`

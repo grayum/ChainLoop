@@ -35,7 +35,7 @@ from app.validation import (
 )
 
 APP_NAME = "ChainLoop"
-APP_VERSION = "0.9.0"
+APP_VERSION = "0.9.1"
 PROJECT_URL = "https://github.com/grayum/ChainLoop"
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES_DIR = BASE_DIR / "templates"
@@ -1568,6 +1568,9 @@ def swap_chain(bike_id: int, chain_id: int = Form(...)):
         if old_chain:
             old_chain.status = "NEEDS_WAX"
             record_event(db, "CHAIN_REMOVED", chain_id=old_chain.id, bike_id=bike_id)
+            # Release the unique IN_USE slot before the replacement can be flushed.
+            # This stays inside the same transaction as installation and both events.
+            db.flush()
         new_chain.status = "IN_USE"
         if new_chain.first_used_at is None:
             new_chain.first_used_at = now()
